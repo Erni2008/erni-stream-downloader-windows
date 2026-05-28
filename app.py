@@ -28,7 +28,7 @@ from downloader.utils import (
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 FORMATS = ["MP4", "MKV"]
 STATUS_LABELS = {
     "Idle": "Готово",
@@ -132,168 +132,217 @@ class StreamDownloaderApp(tk.Tk):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
-        root = ttk.Frame(self, padding=20, style="App.TFrame")
+        bg = self.colors["bg"]
+        panel = self.colors["panel"]
+        soft = self.colors["panel_soft"]
+        ink = self.colors["ink"]
+        muted = self.colors["muted"]
+        line = self.colors["line"]
+        accent = self.colors["accent"]
+
+        def make_button(parent: tk.Widget, text: str, command, variant: str = "secondary", state: str = "normal") -> tk.Button:
+            styles = {
+                "primary": (accent, "#ffffff", "#185abc"),
+                "secondary": ("#eef3fb", ink, "#dbe4f0"),
+                "danger": ("#dc2626", "#ffffff", "#b91c1c"),
+                "ghost": ("#ffffff", ink, "#eef3fb"),
+            }
+            normal_bg, fg, active_bg = styles[variant]
+            button = tk.Button(
+                parent,
+                text=text,
+                command=command,
+                state=state,
+                bg=normal_bg,
+                fg=fg,
+                activebackground=active_bg,
+                activeforeground=fg,
+                disabledforeground="#9aa6b6",
+                relief="flat",
+                bd=0,
+                padx=16,
+                pady=10,
+                cursor="hand2",
+                font=("TkDefaultFont", 11, "bold"),
+                highlightthickness=0,
+            )
+            return button
+
+        def make_entry(parent: tk.Widget, variable: tk.StringVar) -> tk.Entry:
+            return tk.Entry(
+                parent,
+                textvariable=variable,
+                bg="#ffffff",
+                fg=ink,
+                insertbackground=ink,
+                relief="flat",
+                bd=0,
+                highlightthickness=1,
+                highlightbackground="#d9e2ef",
+                highlightcolor=accent,
+                font=("TkDefaultFont", 12),
+            )
+
+        root = tk.Frame(self, bg=bg)
         root.grid(row=0, column=0, sticky="nsew")
         root.columnconfigure(0, weight=1)
         root.rowconfigure(2, weight=1)
 
-        header = ttk.Frame(root, padding=(22, 18), style="Header.TFrame")
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 16))
-        header.columnconfigure(0, weight=1)
-        ttk.Label(header, text=APP_TITLE, style="Header.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(header, text=f"v{APP_VERSION}", style="Version.TLabel").grid(row=0, column=1, sticky="e")
-        ttk.Label(
-            header,
-            text="Профессиональная загрузка YouTube-видео с MP4-совместимостью для Windows, macOS и VEGAS Pro.",
-            style="SubHeader.TLabel",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
+        shell = tk.Frame(root, bg=bg)
+        shell.grid(row=0, column=0, sticky="nsew", padx=26, pady=22)
+        shell.columnconfigure(0, weight=1)
+        shell.rowconfigure(2, weight=1)
 
-        form = ttk.Frame(root, padding=18, style="Panel.TFrame")
-        form.grid(row=1, column=0, sticky="ew", pady=(0, 14))
+        header = tk.Frame(shell, bg="#0f172a", padx=26, pady=22)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+        tk.Label(header, text=APP_TITLE, bg="#0f172a", fg="#ffffff", font=("TkDefaultFont", 26, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(header, text=f"v{APP_VERSION}", bg="#172338", fg="#dbeafe", padx=12, pady=6, font=("TkDefaultFont", 10, "bold")).grid(row=0, column=1, sticky="e")
+        tk.Label(
+            header,
+            text="Загрузка, анализ и подготовка YouTube-видео для просмотра, монтажа и VEGAS Pro.",
+            bg="#0f172a",
+            fg="#b9c6d8",
+            font=("TkDefaultFont", 12),
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(7, 0))
+
+        main = tk.Frame(shell, bg=bg)
+        main.grid(row=1, column=0, sticky="nsew", pady=(18, 14))
+        main.columnconfigure(0, weight=3)
+        main.columnconfigure(1, weight=1)
+
+        form = tk.Frame(main, bg=panel, padx=22, pady=20, highlightthickness=1, highlightbackground="#e1e8f2")
+        form.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
         form.columnconfigure(1, weight=1)
 
-        form_header = ttk.Frame(form, style="Panel.TFrame")
-        form_header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 12))
-        form_header.columnconfigure(0, weight=1)
-        ttk.Label(form_header, text="Настройка загрузки", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(form_header, text="Ссылка, папка, качество и формат", style="SectionSubTitle.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 0))
-        ttk.Label(form_header, textvariable=self.tools_var, style="Tool.TLabel").grid(row=0, column=1, sticky="e")
+        tk.Label(form, text="Настройка загрузки", bg=panel, fg=ink, font=("TkDefaultFont", 18, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
+        tk.Label(form, text="Вставь ссылку, выбери режим и запусти очередь.", bg=panel, fg=muted, font=("TkDefaultFont", 10)).grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 16))
 
-        ttk.Label(form, text="YouTube URL", style="Field.TLabel").grid(row=1, column=0, sticky="w", pady=7)
-        ttk.Entry(form, textvariable=self.url_var).grid(row=1, column=1, sticky="ew", padx=10, pady=7, ipady=3)
-        ttk.Button(form, text="Вставить", command=self._paste_url, style="Secondary.TButton").grid(row=1, column=2, sticky="ew", pady=7)
+        labels = ["YouTube URL", "Save folder", "Quality", "Format", "Mode"]
+        for index, text in enumerate(labels, start=2):
+            tk.Label(form, text=text, bg=panel, fg=ink, font=("TkDefaultFont", 10, "bold")).grid(row=index, column=0, sticky="w", pady=8)
 
-        ttk.Label(form, text="Save folder", style="Field.TLabel").grid(row=2, column=0, sticky="w", pady=7)
-        ttk.Entry(form, textvariable=self.save_dir_var).grid(row=2, column=1, sticky="ew", padx=10, pady=7, ipady=3)
-        ttk.Button(form, text="Выбрать", command=self._browse_directory, style="Secondary.TButton").grid(row=2, column=2, sticky="ew", pady=7)
+        make_entry(form, self.url_var).grid(row=2, column=1, sticky="ew", padx=12, pady=8, ipady=10)
+        make_button(form, "Вставить", self._paste_url).grid(row=2, column=2, sticky="ew", pady=8)
 
-        ttk.Label(form, text="Quality", style="Field.TLabel").grid(row=3, column=0, sticky="w", pady=7)
-        quality_box = ttk.Combobox(
-            form,
-            textvariable=self.quality_var,
-            values=list(QUALITY_FORMATS.keys()),
-            state="readonly",
-        )
-        quality_box.grid(row=3, column=1, sticky="ew", padx=10, pady=7, ipady=3)
-        ttk.Button(form, text="Проверить", command=self._start_quality_check, style="Secondary.TButton").grid(row=3, column=2, sticky="ew", pady=7)
+        make_entry(form, self.save_dir_var).grid(row=3, column=1, sticky="ew", padx=12, pady=8, ipady=10)
+        make_button(form, "Выбрать", self._browse_directory).grid(row=3, column=2, sticky="ew", pady=8)
 
-        ttk.Label(form, text="Format", style="Field.TLabel").grid(row=4, column=0, sticky="w", pady=7)
+        quality_box = ttk.Combobox(form, textvariable=self.quality_var, values=list(QUALITY_FORMATS.keys()), state="readonly")
+        quality_box.grid(row=4, column=1, sticky="ew", padx=12, pady=8, ipady=6)
+        make_button(form, "Анализ", self._start_quality_check).grid(row=4, column=2, sticky="ew", pady=8)
+
         format_box = ttk.Combobox(form, textvariable=self.format_var, values=FORMATS, state="readonly")
-        format_box.grid(row=4, column=1, sticky="ew", padx=10, pady=7, ipady=3)
-        ttk.Label(form, text="MP4 = H.264/AAC/CFR для монтажа", style="Hint.TLabel").grid(row=4, column=2, sticky="w", pady=7)
+        format_box.grid(row=5, column=1, sticky="ew", padx=12, pady=8, ipady=6)
+        tk.Label(form, text="MP4 подходит для плееров и монтажа", bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=5, column=2, sticky="w", padx=(0, 4))
 
-        ttk.Label(form, text="Mode", style="Field.TLabel").grid(row=5, column=0, sticky="w", pady=7)
         mode_box = ttk.Combobox(form, textvariable=self.mode_var, values=DOWNLOAD_MODES, state="readonly")
-        mode_box.grid(row=5, column=1, sticky="ew", padx=10, pady=7, ipady=3)
-        ttk.Label(form, text="VEGAS = самый совместимый MP4", style="Hint.TLabel").grid(row=5, column=2, sticky="w", pady=7)
+        mode_box.grid(row=6, column=1, sticky="ew", padx=12, pady=8, ipady=6)
+        tk.Label(form, text="VEGAS = H.264/AAC/CFR", bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=6, column=2, sticky="w", padx=(0, 4))
 
-        temp_check = ttk.Checkbutton(
-            form,
+        option_box = tk.Frame(form, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
+        option_box.grid(row=7, column=1, columnspan=2, sticky="ew", padx=12, pady=(12, 4))
+        tk.Checkbutton(
+            option_box,
             text="Сначала скачать локально, потом скопировать в выбранную папку",
             variable=self.temp_first_var,
-        )
-        temp_check.grid(row=6, column=1, columnspan=2, sticky="w", padx=10, pady=(10, 4))
-        ttk.Label(
-            form,
-            text="Рекомендуется для больших видео, флешек и внешних дисков.",
-            style="Hint.TLabel",
-        ).grid(row=7, column=1, columnspan=2, sticky="w", padx=10, pady=(0, 2))
-        ttk.Label(
-            form,
-            text="Best quality обычно скачивает видео и звук отдельно, затем ffmpeg собирает финальный файл.",
-            style="Hint.TLabel",
-        ).grid(row=8, column=1, columnspan=2, sticky="w", padx=10, pady=(0, 6))
+            bg=soft,
+            fg=ink,
+            activebackground=soft,
+            selectcolor="#ffffff",
+            font=("TkDefaultFont", 10, "bold"),
+            relief="flat",
+            bd=0,
+        ).grid(row=0, column=0, sticky="w")
+        tk.Label(option_box, text="Лучше для больших файлов, флешек и внешних дисков.", bg=soft, fg=muted, font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
-        queue_frame = ttk.Frame(form, padding=12, style="SoftPanel.TFrame")
-        queue_frame.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-        queue_frame.columnconfigure(0, weight=1)
-        ttk.Label(queue_frame, text="Очередь загрузок", style="MetricName.TLabel").grid(row=0, column=0, sticky="w")
-        queue_buttons = ttk.Frame(queue_frame, style="SoftPanel.TFrame")
-        queue_buttons.grid(row=0, column=1, sticky="e")
-        ttk.Button(queue_buttons, text="Добавить ссылку", command=self._add_url_to_queue, style="Secondary.TButton").grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(queue_buttons, text="Удалить", command=self._remove_selected_queue_item, style="Secondary.TButton").grid(row=0, column=1, padx=(0, 6))
-        ttk.Button(queue_buttons, text="Очистить", command=self._clear_queue_items, style="Secondary.TButton").grid(row=0, column=2)
+        action_row = tk.Frame(form, bg=panel)
+        action_row.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(18, 0))
+        action_row.columnconfigure(5, weight=1)
+        self.download_button = make_button(action_row, "Скачать", self._start_download, "primary")
+        self.download_button.grid(row=0, column=0, padx=(0, 8))
+        self.check_quality_button = make_button(action_row, "Анализ видео", self._start_quality_check)
+        self.check_quality_button.grid(row=0, column=1, padx=(0, 8))
+        self.cancel_button = make_button(action_row, "Отмена", self._cancel_download, "danger", state="disabled")
+        self.cancel_button.grid(row=0, column=2, padx=(0, 8))
+        self.open_folder_button = make_button(action_row, "Папка", self._open_output_folder, state="disabled")
+        self.open_folder_button.grid(row=0, column=3, padx=(0, 8))
+        self.update_ytdlp_button = make_button(action_row, "Обновить yt-dlp", self._start_update_ytdlp)
+        self.update_ytdlp_button.grid(row=0, column=4, padx=(0, 8))
+        self.open_log_button = make_button(action_row, "Лог", self._open_log_folder, "ghost")
+        self.open_log_button.grid(row=0, column=5, sticky="e")
+
+        side = tk.Frame(main, bg=panel, padx=18, pady=18, highlightthickness=1, highlightbackground="#e1e8f2")
+        side.grid(row=0, column=1, sticky="nsew")
+        side.columnconfigure(0, weight=1)
+        tk.Label(side, textvariable=self.tools_var, bg="#e8f1ff", fg="#185abc", padx=12, pady=8, font=("TkDefaultFont", 10, "bold")).grid(row=0, column=0, sticky="ew")
+        tk.Label(side, text="Очередь", bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=1, column=0, sticky="w", pady=(18, 6))
+        tk.Label(side, text="Добавляй несколько ссылок и скачивай подряд.", bg=panel, fg=muted, wraplength=260, justify="left", font=("TkDefaultFont", 10)).grid(row=2, column=0, sticky="w")
         self.queue_listbox = tk.Listbox(
-            queue_frame,
-            height=3,
-            bg="#ffffff",
-            fg=self.colors["ink"],
-            selectbackground=self.colors["accent"],
+            side,
+            height=7,
+            bg="#f8fafc",
+            fg=ink,
+            selectbackground=accent,
             relief="flat",
             highlightthickness=1,
-            highlightbackground=self.colors["line"],
+            highlightbackground="#d9e2ef",
             font=("TkDefaultFont", 10),
         )
-        self.queue_listbox.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.queue_listbox.grid(row=3, column=0, sticky="ew", pady=(12, 10))
+        queue_buttons = tk.Frame(side, bg=panel)
+        queue_buttons.grid(row=4, column=0, sticky="ew")
+        queue_buttons.columnconfigure((0, 1, 2), weight=1)
+        make_button(queue_buttons, "+", self._add_url_to_queue, "secondary").grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        make_button(queue_buttons, "Удалить", self._remove_selected_queue_item, "secondary").grid(row=0, column=1, sticky="ew", padx=(0, 6))
+        make_button(queue_buttons, "Очистить", self._clear_queue_items, "secondary").grid(row=0, column=2, sticky="ew")
 
-        button_row = ttk.Frame(form, style="Panel.TFrame")
-        button_row.grid(row=10, column=0, columnspan=3, sticky="ew", pady=(14, 0))
-        button_row.columnconfigure(5, weight=1)
+        tips = tk.Frame(side, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
+        tips.grid(row=5, column=0, sticky="ew", pady=(18, 0))
+        tk.Label(tips, text="Как качает", bg=soft, fg=ink, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(
+            tips,
+            text="В высоком качестве YouTube часто отдаёт видео и звук отдельно. Приложение скачивает оба потока и собирает итоговый файл через ffmpeg.",
+            bg=soft,
+            fg=muted,
+            wraplength=270,
+            justify="left",
+            font=("TkDefaultFont", 9),
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
-        self.download_button = ttk.Button(button_row, text="Скачать", command=self._start_download, style="Primary.TButton")
-        self.download_button.grid(row=0, column=0, padx=(0, 8))
-
-        self.check_quality_button = ttk.Button(button_row, text="Анализ видео", command=self._start_quality_check, style="Secondary.TButton")
-        self.check_quality_button.grid(row=0, column=1, padx=(0, 8))
-
-        self.cancel_button = ttk.Button(button_row, text="Отмена", command=self._cancel_download, state="disabled", style="Danger.TButton")
-        self.cancel_button.grid(row=0, column=2, padx=(0, 8))
-
-        self.open_folder_button = ttk.Button(
-            button_row,
-            text="Открыть папку",
-            command=self._open_output_folder,
-            state="disabled",
-            style="Secondary.TButton",
-        )
-        self.open_folder_button.grid(row=0, column=3, padx=(0, 8))
-
-        self.update_ytdlp_button = ttk.Button(button_row, text="Обновить yt-dlp", command=self._start_update_ytdlp, style="Secondary.TButton")
-        self.update_ytdlp_button.grid(row=0, column=4, padx=(0, 8))
-
-        self.open_log_button = ttk.Button(button_row, text="Открыть лог", command=self._open_log_folder, style="Secondary.TButton")
-        self.open_log_button.grid(row=0, column=5, padx=(0, 8))
-
-        status_frame = ttk.Frame(root, padding=16, style="Panel.TFrame")
+        status_frame = tk.Frame(shell, bg=panel, padx=18, pady=16, highlightthickness=1, highlightbackground="#e1e8f2")
         status_frame.grid(row=2, column=0, sticky="ew", pady=(0, 14))
         status_frame.columnconfigure(0, weight=1)
         status_frame.columnconfigure(1, weight=1)
-
-        status_card = ttk.Frame(status_frame, padding=12, style="SoftPanel.TFrame")
-        status_card.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        ttk.Label(status_card, text="СТАТУС", style="MetricName.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(status_card, textvariable=self.status_var, style="Metric.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 0))
-
-        progress_card = ttk.Frame(status_frame, padding=12, style="SoftPanel.TFrame")
-        progress_card.grid(row=0, column=1, sticky="ew")
-        ttk.Label(progress_card, text="ПРОГРЕСС", style="MetricName.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(progress_card, textvariable=self.percent_var, style="Metric.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 0))
-
+        tk.Label(status_frame, text="СТАТУС", bg=panel, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(status_frame, text="ПРОГРЕСС", bg=panel, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=1, sticky="w", padx=(18, 0))
+        tk.Label(status_frame, textvariable=self.status_var, bg=panel, fg=ink, font=("TkDefaultFont", 13, "bold")).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        tk.Label(status_frame, textvariable=self.percent_var, bg=panel, fg=ink, font=("TkDefaultFont", 13, "bold")).grid(row=1, column=1, sticky="w", padx=(18, 0), pady=(4, 0))
         self.progress = ttk.Progressbar(status_frame, mode="determinate", maximum=100)
-        self.progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        self.progress.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
 
-        log_frame = ttk.LabelFrame(root, text="Журнал загрузки", style="Card.TLabelframe")
-        log_frame.grid(row=3, column=0, sticky="nsew")
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
-        root.rowconfigure(3, weight=1)
-
+        log_panel = tk.Frame(shell, bg=panel, padx=16, pady=14, highlightthickness=1, highlightbackground="#e1e8f2")
+        log_panel.grid(row=3, column=0, sticky="nsew")
+        log_panel.columnconfigure(0, weight=1)
+        log_panel.rowconfigure(1, weight=1)
+        shell.rowconfigure(3, weight=1)
+        tk.Label(log_panel, text="Журнал загрузки", bg=panel, fg=ink, font=("TkDefaultFont", 13, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 10))
         self.log_text = tk.Text(
-            log_frame,
+            log_panel,
             wrap="word",
-            height=16,
+            height=13,
             state="disabled",
             bg=self.colors["log_bg"],
             fg=self.colors["log_fg"],
             insertbackground=self.colors["log_fg"],
             relief="flat",
-            padx=12,
-            pady=10,
+            padx=14,
+            pady=12,
             font=("Menlo", 11) if self.tk.call("tk", "windowingsystem") == "aqua" else ("Consolas", 10),
         )
-        self.log_text.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_text.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.log_text.grid(row=1, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(log_panel, orient="vertical", command=self.log_text.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=scrollbar.set)
         self._refresh_tool_status()
 

@@ -1,6 +1,6 @@
 # ERNI Stream Downloader for Windows
 
-Windows-версия ERNI Stream Downloader `1.2.0`.
+Windows-версия ERNI Stream Downloader `1.2.1`.
 
 Приложение скачивает ваши YouTube-стримы/видео через `yt-dlp` и `ffmpeg`, а затем делает совместимый `MP4` для обычных плееров и VEGAS Pro.
 
