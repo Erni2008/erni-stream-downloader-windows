@@ -42,8 +42,8 @@ class StreamDownloaderApp(tk.Tk):
         super().__init__()
         ensure_tool_path()
         self.title(APP_TITLE)
-        self.geometry("980x720")
-        self.minsize(860, 620)
+        self.geometry("1120x760")
+        self.minsize(980, 680)
 
         self.config_data = load_config()
         self.event_queue: queue.Queue[tuple[str, object]] = queue.Queue()
@@ -66,7 +66,7 @@ class StreamDownloaderApp(tk.Tk):
         self.after(100, self._process_events)
 
     def _configure_style(self) -> None:
-        self.configure(bg="#f4f7fb")
+        self.configure(bg="#eef3f8")
         self.style = ttk.Style(self)
         try:
             self.style.theme_use("clam")
@@ -74,35 +74,44 @@ class StreamDownloaderApp(tk.Tk):
             pass
 
         self.colors = {
-            "bg": "#f4f7fb",
+            "bg": "#eef3f8",
             "panel": "#ffffff",
-            "ink": "#172033",
-            "muted": "#657085",
-            "line": "#d8e0ea",
-            "accent": "#2563eb",
-            "accent_dark": "#1d4ed8",
-            "danger": "#dc2626",
-            "success": "#16a34a",
-            "log_bg": "#0f172a",
-            "log_fg": "#dbeafe",
+            "panel_soft": "#f8fafc",
+            "ink": "#111827",
+            "muted": "#64748b",
+            "line": "#d7dee8",
+            "accent": "#1f6feb",
+            "accent_dark": "#1957ba",
+            "danger": "#d92d20",
+            "success": "#118c4f",
+            "log_bg": "#0b1220",
+            "log_fg": "#d8e7ff",
         }
 
         self.style.configure("App.TFrame", background=self.colors["bg"])
-        self.style.configure("Panel.TFrame", background=self.colors["panel"], relief="flat")
-        self.style.configure("Header.TLabel", background=self.colors["bg"], foreground=self.colors["ink"], font=("TkDefaultFont", 24, "bold"))
-        self.style.configure("SubHeader.TLabel", background=self.colors["bg"], foreground=self.colors["muted"], font=("TkDefaultFont", 12))
-        self.style.configure("SectionTitle.TLabel", background=self.colors["panel"], foreground=self.colors["ink"], font=("TkDefaultFont", 13, "bold"))
+        self.style.configure("Panel.TFrame", background=self.colors["panel"], relief="solid", borderwidth=1)
+        self.style.configure("Header.TFrame", background="#111827")
+        self.style.configure("SoftPanel.TFrame", background=self.colors["panel_soft"], relief="solid", borderwidth=1)
+        self.style.configure("Header.TLabel", background="#111827", foreground="#ffffff", font=("TkDefaultFont", 24, "bold"))
+        self.style.configure("SubHeader.TLabel", background="#111827", foreground="#b7c4d8", font=("TkDefaultFont", 12))
+        self.style.configure("Version.TLabel", background="#1f2937", foreground="#dbeafe", font=("TkDefaultFont", 10, "bold"), padding=(10, 5))
+        self.style.configure("SectionTitle.TLabel", background=self.colors["panel"], foreground=self.colors["ink"], font=("TkDefaultFont", 14, "bold"))
+        self.style.configure("SectionSubTitle.TLabel", background=self.colors["panel"], foreground=self.colors["muted"], font=("TkDefaultFont", 10))
         self.style.configure("Hint.TLabel", background=self.colors["panel"], foreground=self.colors["muted"], font=("TkDefaultFont", 10))
-        self.style.configure("Tool.TLabel", background="#e8f0ff", foreground=self.colors["accent_dark"], font=("TkDefaultFont", 10, "bold"), padding=(10, 5))
+        self.style.configure("SoftHint.TLabel", background=self.colors["panel_soft"], foreground=self.colors["muted"], font=("TkDefaultFont", 10))
+        self.style.configure("Tool.TLabel", background="#e8f0ff", foreground=self.colors["accent_dark"], font=("TkDefaultFont", 10, "bold"), padding=(12, 6))
         self.style.configure("Field.TLabel", background=self.colors["panel"], foreground=self.colors["ink"], font=("TkDefaultFont", 11, "bold"))
         self.style.configure("Status.TLabel", background=self.colors["panel"], foreground=self.colors["muted"], font=("TkDefaultFont", 11, "bold"))
-        self.style.configure("Value.TLabel", background=self.colors["panel"], foreground=self.colors["ink"], font=("TkDefaultFont", 11))
+        self.style.configure("Value.TLabel", background=self.colors["panel"], foreground=self.colors["ink"], font=("TkDefaultFont", 12, "bold"))
+        self.style.configure("Metric.TLabel", background=self.colors["panel_soft"], foreground=self.colors["ink"], font=("TkDefaultFont", 12, "bold"))
+        self.style.configure("MetricName.TLabel", background=self.colors["panel_soft"], foreground=self.colors["muted"], font=("TkDefaultFont", 9, "bold"))
         self.style.configure("TEntry", fieldbackground="#ffffff", bordercolor=self.colors["line"], lightcolor=self.colors["line"], darkcolor=self.colors["line"], padding=8)
         self.style.configure("TCombobox", fieldbackground="#ffffff", bordercolor=self.colors["line"], padding=8)
         self.style.configure("TButton", padding=(14, 9), font=("TkDefaultFont", 11, "bold"))
         self.style.configure("Primary.TButton", background=self.colors["accent"], foreground="#ffffff", bordercolor=self.colors["accent"])
         self.style.map("Primary.TButton", background=[("active", self.colors["accent_dark"])], foreground=[("disabled", "#cbd5e1")])
         self.style.configure("Danger.TButton", background=self.colors["danger"], foreground="#ffffff", bordercolor=self.colors["danger"])
+        self.style.configure("Secondary.TButton", background="#eef2f7", foreground=self.colors["ink"], bordercolor=self.colors["line"])
         self.style.configure("Card.TLabelframe", background=self.colors["panel"], bordercolor=self.colors["line"], relief="solid")
         self.style.configure("Card.TLabelframe.Label", background=self.colors["panel"], foreground=self.colors["ink"], font=("TkDefaultFont", 11, "bold"))
         self.style.configure("Horizontal.TProgressbar", troughcolor="#e5eaf2", background=self.colors["accent"], bordercolor="#e5eaf2", lightcolor=self.colors["accent"], darkcolor=self.colors["accent"])
@@ -111,20 +120,21 @@ class StreamDownloaderApp(tk.Tk):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
-        root = ttk.Frame(self, padding=22, style="App.TFrame")
+        root = ttk.Frame(self, padding=20, style="App.TFrame")
         root.grid(row=0, column=0, sticky="nsew")
         root.columnconfigure(0, weight=1)
         root.rowconfigure(2, weight=1)
 
-        header = ttk.Frame(root, style="App.TFrame")
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 18))
+        header = ttk.Frame(root, padding=(22, 18), style="Header.TFrame")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 16))
         header.columnconfigure(0, weight=1)
-        ttk.Label(header, text=f"{APP_TITLE} {APP_VERSION}", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text=APP_TITLE, style="Header.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text=f"v{APP_VERSION}", style="Version.TLabel").grid(row=0, column=1, sticky="e")
         ttk.Label(
             header,
-            text="Download your own YouTube streams with yt-dlp + ffmpeg, without touching Terminal.",
+            text="Профессиональная загрузка YouTube-видео с MP4-совместимостью для Windows, macOS и VEGAS Pro.",
             style="SubHeader.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
         form = ttk.Frame(root, padding=18, style="Panel.TFrame")
         form.grid(row=1, column=0, sticky="ew", pady=(0, 14))
@@ -133,16 +143,17 @@ class StreamDownloaderApp(tk.Tk):
         form_header = ttk.Frame(form, style="Panel.TFrame")
         form_header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 12))
         form_header.columnconfigure(0, weight=1)
-        ttk.Label(form_header, text="Download setup", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(form_header, text="Настройка загрузки", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(form_header, text="Ссылка, папка, качество и формат", style="SectionSubTitle.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 0))
         ttk.Label(form_header, textvariable=self.tools_var, style="Tool.TLabel").grid(row=0, column=1, sticky="e")
 
         ttk.Label(form, text="YouTube URL", style="Field.TLabel").grid(row=1, column=0, sticky="w", pady=7)
         ttk.Entry(form, textvariable=self.url_var).grid(row=1, column=1, sticky="ew", padx=10, pady=7, ipady=3)
-        ttk.Button(form, text="Paste", command=self._paste_url).grid(row=1, column=2, sticky="ew", pady=7)
+        ttk.Button(form, text="Вставить", command=self._paste_url, style="Secondary.TButton").grid(row=1, column=2, sticky="ew", pady=7)
 
-        ttk.Label(form, text="Save directory", style="Field.TLabel").grid(row=2, column=0, sticky="w", pady=7)
+        ttk.Label(form, text="Save folder", style="Field.TLabel").grid(row=2, column=0, sticky="w", pady=7)
         ttk.Entry(form, textvariable=self.save_dir_var).grid(row=2, column=1, sticky="ew", padx=10, pady=7, ipady=3)
-        ttk.Button(form, text="Browse", command=self._browse_directory).grid(row=2, column=2, sticky="ew", pady=7)
+        ttk.Button(form, text="Выбрать", command=self._browse_directory, style="Secondary.TButton").grid(row=2, column=2, sticky="ew", pady=7)
 
         ttk.Label(form, text="Quality", style="Field.TLabel").grid(row=3, column=0, sticky="w", pady=7)
         quality_box = ttk.Combobox(
@@ -152,60 +163,74 @@ class StreamDownloaderApp(tk.Tk):
             state="readonly",
         )
         quality_box.grid(row=3, column=1, sticky="ew", padx=10, pady=7, ipady=3)
+        ttk.Button(form, text="Проверить", command=self._start_quality_check, style="Secondary.TButton").grid(row=3, column=2, sticky="ew", pady=7)
 
         ttk.Label(form, text="Format", style="Field.TLabel").grid(row=4, column=0, sticky="w", pady=7)
         format_box = ttk.Combobox(form, textvariable=self.format_var, values=FORMATS, state="readonly")
         format_box.grid(row=4, column=1, sticky="ew", padx=10, pady=7, ipady=3)
+        ttk.Label(form, text="MP4 = H.264/AAC/CFR для монтажа", style="Hint.TLabel").grid(row=4, column=2, sticky="w", pady=7)
 
         temp_check = ttk.Checkbutton(
             form,
-            text="Download to temporary local folder first, then copy to selected drive",
+            text="Сначала скачать локально, потом скопировать в выбранную папку",
             variable=self.temp_first_var,
         )
-        temp_check.grid(row=5, column=1, sticky="w", padx=10, pady=(10, 4))
+        temp_check.grid(row=5, column=1, columnspan=2, sticky="w", padx=10, pady=(10, 4))
         ttk.Label(
             form,
-            text="2K mode first requests exact 1440p if YouTube provides it; otherwise it falls back to the best lower quality.",
+            text="Рекомендуется для больших видео, флешек и внешних дисков.",
             style="Hint.TLabel",
-        ).grid(row=6, column=1, sticky="w", padx=10, pady=(0, 2))
+        ).grid(row=6, column=1, columnspan=2, sticky="w", padx=10, pady=(0, 2))
         ttk.Label(
             form,
-            text="Best quality usually downloads video + audio separately, then ffmpeg merges them into one final file.",
+            text="Best quality обычно скачивает видео и звук отдельно, затем ffmpeg собирает финальный файл.",
             style="Hint.TLabel",
-        ).grid(row=7, column=1, sticky="w", padx=10, pady=(0, 6))
+        ).grid(row=7, column=1, columnspan=2, sticky="w", padx=10, pady=(0, 6))
 
         button_row = ttk.Frame(form, style="Panel.TFrame")
         button_row.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(14, 0))
         button_row.columnconfigure(4, weight=1)
 
-        self.download_button = ttk.Button(button_row, text="Download", command=self._start_download, style="Primary.TButton")
+        self.download_button = ttk.Button(button_row, text="Скачать", command=self._start_download, style="Primary.TButton")
         self.download_button.grid(row=0, column=0, padx=(0, 8))
 
-        self.check_quality_button = ttk.Button(button_row, text="Проверить качество", command=self._start_quality_check)
+        self.check_quality_button = ttk.Button(button_row, text="Проверить качество", command=self._start_quality_check, style="Secondary.TButton")
         self.check_quality_button.grid(row=0, column=1, padx=(0, 8))
 
-        self.cancel_button = ttk.Button(button_row, text="Cancel", command=self._cancel_download, state="disabled", style="Danger.TButton")
+        self.cancel_button = ttk.Button(button_row, text="Отмена", command=self._cancel_download, state="disabled", style="Danger.TButton")
         self.cancel_button.grid(row=0, column=2, padx=(0, 8))
 
         self.open_folder_button = ttk.Button(
             button_row,
-            text="Open folder",
+            text="Открыть папку",
             command=self._open_output_folder,
             state="disabled",
+            style="Secondary.TButton",
         )
         self.open_folder_button.grid(row=0, column=3, padx=(0, 8))
 
+        self.open_log_button = ttk.Button(button_row, text="Открыть лог", command=self._open_log_folder, style="Secondary.TButton")
+        self.open_log_button.grid(row=0, column=4, padx=(0, 8))
+
         status_frame = ttk.Frame(root, padding=16, style="Panel.TFrame")
         status_frame.grid(row=2, column=0, sticky="ew", pady=(0, 14))
-        status_frame.columnconfigure(2, weight=1)
-        ttk.Label(status_frame, text="Status", style="Status.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(status_frame, textvariable=self.status_var, style="Value.TLabel").grid(row=0, column=1, sticky="w", padx=(10, 0))
-        ttk.Label(status_frame, textvariable=self.percent_var, style="Status.TLabel").grid(row=0, column=2, sticky="e")
+        status_frame.columnconfigure(0, weight=1)
+        status_frame.columnconfigure(1, weight=1)
+
+        status_card = ttk.Frame(status_frame, padding=12, style="SoftPanel.TFrame")
+        status_card.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        ttk.Label(status_card, text="СТАТУС", style="MetricName.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(status_card, textvariable=self.status_var, style="Metric.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 0))
+
+        progress_card = ttk.Frame(status_frame, padding=12, style="SoftPanel.TFrame")
+        progress_card.grid(row=0, column=1, sticky="ew")
+        ttk.Label(progress_card, text="ПРОГРЕСС", style="MetricName.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(progress_card, textvariable=self.percent_var, style="Metric.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 0))
 
         self.progress = ttk.Progressbar(status_frame, mode="determinate", maximum=100)
-        self.progress.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        self.progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(12, 0))
 
-        log_frame = ttk.LabelFrame(root, text="Download log", style="Card.TLabelframe")
+        log_frame = ttk.LabelFrame(root, text="Журнал загрузки", style="Card.TLabelframe")
         log_frame.grid(row=3, column=0, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
@@ -214,7 +239,7 @@ class StreamDownloaderApp(tk.Tk):
         self.log_text = tk.Text(
             log_frame,
             wrap="word",
-            height=18,
+            height=16,
             state="disabled",
             bg=self.colors["log_bg"],
             fg=self.colors["log_fg"],
@@ -514,6 +539,9 @@ class StreamDownloaderApp(tk.Tk):
             open_folder(self.last_output_file.parent)
         elif self.save_dir_var.get().strip():
             open_folder(Path(self.save_dir_var.get().strip()))
+
+    def _open_log_folder(self) -> None:
+        open_folder(self.log_file.parent)
 
     def _warn_if_external_drive(self, path: Path) -> None:
         if is_probably_external_drive(path):
