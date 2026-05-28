@@ -28,6 +28,12 @@ QUALITY_FORMATS = {
     "720p": "bestvideo[height=720]+bestaudio/best[height=720]/bestvideo[height<=720]+bestaudio/best[height<=720]/best",
 }
 
+DOWNLOAD_MODES = [
+    "Для просмотра",
+    "Для VEGAS",
+    "Максимальное качество без перекодирования",
+]
+
 
 @dataclass
 class DownloadRequest:
@@ -35,7 +41,9 @@ class DownloadRequest:
     save_directory: Path
     quality: str
     output_format: str
+    download_mode: str
     use_temp_first: bool
+    estimated_size: int | None = None
 
 
 @dataclass
@@ -106,10 +114,12 @@ class DownloadWorker:
 
         try:
             self.request.save_directory.mkdir(parents=True, exist_ok=True)
+            self._ensure_preflight_space(self.request.save_directory)
 
             if self.request.use_temp_first:
                 temp_dir = Path(tempfile.mkdtemp(prefix="erni-stream-download-"))
                 actual_download_dir = temp_dir
+                self._ensure_preflight_space(actual_download_dir)
                 self.on_log(f"Temporary download folder: {temp_dir}\n")
 
             before_files = self._snapshot_files(actual_download_dir)
@@ -210,6 +220,9 @@ class DownloadWorker:
     def _ensure_player_compatible_file(self, source: Path) -> Path:
         if self.request.output_format.upper() != "MP4":
             return source
+        if self.request.download_mode == "Максимальное качество без перекодирования":
+            self.on_log("\nSkipping MP4 compatibility conversion because no-transcode mode is selected.\n")
+            return source
 
         ffmpeg = find_executable("ffmpeg")
         if not ffmpeg:
@@ -223,9 +236,14 @@ class DownloadWorker:
             final_target = self._unique_destination(final_target)
         temp_output = self._unique_destination(source.with_name(f"{source.stem}.encoding.mp4"))
         self.on_status("Converting")
-        self.on_log(
-            "\nMaking MP4 compatible with standard players and VEGAS Pro: H.264 video + AAC audio + constant frame rate...\n"
-        )
+        if self.request.download_mode == "Для VEGAS":
+            self.on_log(
+                "\nMaking MP4 compatible with VEGAS Pro: H.264 video + AAC audio + constant frame rate...\n"
+            )
+        else:
+            self.on_log(
+                "\nMaking MP4 compatible with standard players: H.264 video + AAC audio...\n"
+            )
 
         command = [
             ffmpeg,
@@ -246,8 +264,10 @@ class DownloadWorker:
             "high",
             "-pix_fmt",
             "yuv420p",
-            "-fps_mode",
-            "cfr",
+        ]
+        if self.request.download_mode == "Для VEGAS":
+            command.extend(["-fps_mode", "cfr"])
+        command.extend([
             "-c:a",
             "aac",
             "-b:a",
@@ -259,7 +279,7 @@ class DownloadWorker:
             "-movflags",
             "+faststart",
             str(temp_output),
-        ]
+        ])
 
         return_code = self._run_process(command)
         if self._cancel_requested.is_set():
@@ -285,6 +305,22 @@ class DownloadWorker:
         if usage.free < required:
             raise RuntimeError(
                 "Not enough free space to create a VEGAS-compatible MP4.\n"
+                f"Free space: {usage.free / (1024 ** 3):.1f} GB\n"
+                f"Recommended free space: {required / (1024 ** 3):.1f} GB"
+            )
+
+    def _ensure_preflight_space(self, destination: Path) -> None:
+        if not self.request.estimated_size:
+            return
+        usage = shutil.disk_usage(destination)
+        multiplier = 2.6 if (
+            self.request.output_format.upper() == "MP4"
+            and self.request.download_mode != "Максимальное качество без перекодирования"
+        ) else 1.4
+        required = int(self.request.estimated_size * multiplier)
+        if usage.free < required:
+            raise RuntimeError(
+                "Not enough free space before starting the download.\n"
                 f"Free space: {usage.free / (1024 ** 3):.1f} GB\n"
                 f"Recommended free space: {required / (1024 ** 3):.1f} GB"
             )

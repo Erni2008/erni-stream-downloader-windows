@@ -55,8 +55,19 @@ if (!(Test-Path $ffmpegExe)) {
   --onefile `
   --windowed `
   --name "ERNI Stream Downloader" `
+  --icon "assets\erni-icon.ico" `
   --add-binary "$ytDlpExe;." `
   --add-binary "$ffmpegExe;." `
   app.py
 
 Write-Host "Built: dist\\ERNI Stream Downloader.exe"
+
+$iscc = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+if ($iscc) {
+  Write-Host "Building branded installer with Inno Setup..."
+  & $iscc.Source "installer\ERNIStreamDownloader.iss"
+  Write-Host "Built installer: installer-output\\ERNI Stream Downloader Setup.exe"
+} else {
+  Write-Host "Inno Setup was not found. EXE is ready; install Inno Setup to build installer:"
+  Write-Host "winget install JRSoftware.InnoSetup"
+}

@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build Windows EXE and Installer
 
 on:
   workflow_dispatch:
@@ -19,6 +19,10 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y
+
       - name: Build EXE
         shell: pwsh
         run: .\build_windows.ps1
@@ -28,3 +32,9 @@ jobs:
         with:
           name: ERNI-Stream-Downloader-Windows
           path: dist/ERNI Stream Downloader.exe
+
+      - name: Upload Windows Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ERNI-Stream-Downloader-Windows-Installer
+          path: installer-output/ERNI Stream Downloader Setup.exe

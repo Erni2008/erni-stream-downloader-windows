@@ -1,21 +1,26 @@
 from __future__ import annotations
 
 import queue
+import json
+import os
+import platform
 import re
 import subprocess
 import threading
 import tkinter as tk
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from downloader.config import AppConfig, get_log_path, load_config, save_config
-from downloader.core import DownloadRequest, DownloadResult, DownloadWorker, QUALITY_FORMATS
+from downloader.core import DOWNLOAD_MODES, DownloadRequest, DownloadResult, DownloadWorker, QUALITY_FORMATS
 from downloader.utils import (
     check_dependencies,
     dependency_instructions,
     ensure_tool_path,
     find_executable,
+    get_user_tool_path,
     is_probably_external_drive,
     is_supported_youtube_url,
     open_folder,
@@ -23,7 +28,7 @@ from downloader.utils import (
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 FORMATS = ["MP4", "MKV"]
 STATUS_LABELS = {
     "Idle": "Готово",
@@ -34,6 +39,7 @@ STATUS_LABELS = {
     "Finished": "Готово",
     "Error": "Ошибка",
     "Cancelling": "Отмена",
+    "Analyzing": "Анализ видео",
 }
 
 
@@ -50,11 +56,17 @@ class StreamDownloaderApp(tk.Tk):
         self.worker: DownloadWorker | None = None
         self.last_output_file: Path | None = None
         self.log_file = get_log_path()
+        self.pending_urls: list[str] = []
+        self.queue_urls: list[str] = []
+        self.active_url: str | None = None
+        self.last_analysis_url: str | None = None
+        self.last_analysis_size: int | None = None
 
         self.url_var = tk.StringVar()
         self.save_dir_var = tk.StringVar(value=self.config_data.save_directory)
         self.quality_var = tk.StringVar(value=self.config_data.quality)
         self.format_var = tk.StringVar(value=self.config_data.output_format)
+        self.mode_var = tk.StringVar(value=self.config_data.download_mode)
         self.temp_first_var = tk.BooleanVar(value=self.config_data.use_temp_first)
         self.status_var = tk.StringVar(value=STATUS_LABELS["Idle"])
         self.percent_var = tk.StringVar(value="0%")
@@ -170,31 +182,58 @@ class StreamDownloaderApp(tk.Tk):
         format_box.grid(row=4, column=1, sticky="ew", padx=10, pady=7, ipady=3)
         ttk.Label(form, text="MP4 = H.264/AAC/CFR для монтажа", style="Hint.TLabel").grid(row=4, column=2, sticky="w", pady=7)
 
+        ttk.Label(form, text="Mode", style="Field.TLabel").grid(row=5, column=0, sticky="w", pady=7)
+        mode_box = ttk.Combobox(form, textvariable=self.mode_var, values=DOWNLOAD_MODES, state="readonly")
+        mode_box.grid(row=5, column=1, sticky="ew", padx=10, pady=7, ipady=3)
+        ttk.Label(form, text="VEGAS = самый совместимый MP4", style="Hint.TLabel").grid(row=5, column=2, sticky="w", pady=7)
+
         temp_check = ttk.Checkbutton(
             form,
             text="Сначала скачать локально, потом скопировать в выбранную папку",
             variable=self.temp_first_var,
         )
-        temp_check.grid(row=5, column=1, columnspan=2, sticky="w", padx=10, pady=(10, 4))
+        temp_check.grid(row=6, column=1, columnspan=2, sticky="w", padx=10, pady=(10, 4))
         ttk.Label(
             form,
             text="Рекомендуется для больших видео, флешек и внешних дисков.",
             style="Hint.TLabel",
-        ).grid(row=6, column=1, columnspan=2, sticky="w", padx=10, pady=(0, 2))
+        ).grid(row=7, column=1, columnspan=2, sticky="w", padx=10, pady=(0, 2))
         ttk.Label(
             form,
             text="Best quality обычно скачивает видео и звук отдельно, затем ffmpeg собирает финальный файл.",
             style="Hint.TLabel",
-        ).grid(row=7, column=1, columnspan=2, sticky="w", padx=10, pady=(0, 6))
+        ).grid(row=8, column=1, columnspan=2, sticky="w", padx=10, pady=(0, 6))
+
+        queue_frame = ttk.Frame(form, padding=12, style="SoftPanel.TFrame")
+        queue_frame.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        queue_frame.columnconfigure(0, weight=1)
+        ttk.Label(queue_frame, text="Очередь загрузок", style="MetricName.TLabel").grid(row=0, column=0, sticky="w")
+        queue_buttons = ttk.Frame(queue_frame, style="SoftPanel.TFrame")
+        queue_buttons.grid(row=0, column=1, sticky="e")
+        ttk.Button(queue_buttons, text="Добавить ссылку", command=self._add_url_to_queue, style="Secondary.TButton").grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(queue_buttons, text="Удалить", command=self._remove_selected_queue_item, style="Secondary.TButton").grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(queue_buttons, text="Очистить", command=self._clear_queue_items, style="Secondary.TButton").grid(row=0, column=2)
+        self.queue_listbox = tk.Listbox(
+            queue_frame,
+            height=3,
+            bg="#ffffff",
+            fg=self.colors["ink"],
+            selectbackground=self.colors["accent"],
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=self.colors["line"],
+            font=("TkDefaultFont", 10),
+        )
+        self.queue_listbox.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
 
         button_row = ttk.Frame(form, style="Panel.TFrame")
-        button_row.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(14, 0))
-        button_row.columnconfigure(4, weight=1)
+        button_row.grid(row=10, column=0, columnspan=3, sticky="ew", pady=(14, 0))
+        button_row.columnconfigure(5, weight=1)
 
         self.download_button = ttk.Button(button_row, text="Скачать", command=self._start_download, style="Primary.TButton")
         self.download_button.grid(row=0, column=0, padx=(0, 8))
 
-        self.check_quality_button = ttk.Button(button_row, text="Проверить качество", command=self._start_quality_check, style="Secondary.TButton")
+        self.check_quality_button = ttk.Button(button_row, text="Анализ видео", command=self._start_quality_check, style="Secondary.TButton")
         self.check_quality_button.grid(row=0, column=1, padx=(0, 8))
 
         self.cancel_button = ttk.Button(button_row, text="Отмена", command=self._cancel_download, state="disabled", style="Danger.TButton")
@@ -209,8 +248,11 @@ class StreamDownloaderApp(tk.Tk):
         )
         self.open_folder_button.grid(row=0, column=3, padx=(0, 8))
 
+        self.update_ytdlp_button = ttk.Button(button_row, text="Обновить yt-dlp", command=self._start_update_ytdlp, style="Secondary.TButton")
+        self.update_ytdlp_button.grid(row=0, column=4, padx=(0, 8))
+
         self.open_log_button = ttk.Button(button_row, text="Открыть лог", command=self._open_log_folder, style="Secondary.TButton")
-        self.open_log_button.grid(row=0, column=4, padx=(0, 8))
+        self.open_log_button.grid(row=0, column=5, padx=(0, 8))
 
         status_frame = ttk.Frame(root, padding=16, style="Panel.TFrame")
         status_frame.grid(row=2, column=0, sticky="ew", pady=(0, 14))
@@ -276,31 +318,80 @@ class StreamDownloaderApp(tk.Tk):
             self.save_dir_var.set(directory)
             self._warn_if_external_drive(Path(directory))
 
-    def _start_download(self) -> None:
+    def _add_url_to_queue(self) -> None:
         url = self.url_var.get().strip()
-        save_directory = Path(self.save_dir_var.get().strip()).expanduser()
-
         if not url:
-            messagebox.showwarning("Missing URL", "Paste a YouTube URL first.")
+            messagebox.showwarning("Очередь", "Сначала вставь YouTube-ссылку.")
             return
         if not is_supported_youtube_url(url):
+            messagebox.showwarning("Очередь", "Это не похоже на YouTube-ссылку.")
+            return
+        if url in self.queue_urls:
+            messagebox.showinfo("Очередь", "Эта ссылка уже есть в очереди.")
+            return
+        self.queue_urls.append(url)
+        self.queue_listbox.insert("end", url)
+        self.url_var.set("")
+
+    def _remove_selected_queue_item(self) -> None:
+        selected = list(self.queue_listbox.curselection())
+        for index in reversed(selected):
+            self.queue_listbox.delete(index)
+            del self.queue_urls[index]
+
+    def _clear_queue_items(self) -> None:
+        self.queue_urls.clear()
+        self.queue_listbox.delete(0, "end")
+
+    def _start_download(self) -> None:
+        urls = self._collect_download_urls()
+        if not urls:
+            return
+        self.pending_urls = urls
+        self._clear_queue_items()
+        self._clear_log()
+        self._write_log_file(
+            f"\n=== {APP_TITLE} {APP_VERSION} session {datetime.now().isoformat(timespec='seconds')} ===\n"
+            f"Queue size: {len(self.pending_urls)}\n"
+            f"Save directory: {Path(self.save_dir_var.get().strip()).expanduser()}\n"
+            f"Quality: {self.quality_var.get()}\n"
+            f"Format: {self.format_var.get()}\n"
+            f"Mode: {self.mode_var.get()}\n"
+            f"Temp first: {self.temp_first_var.get()}\n\n"
+        )
+        self._start_next_download()
+
+    def _collect_download_urls(self) -> list[str] | None:
+        urls = list(self.queue_urls)
+        typed_url = self.url_var.get().strip()
+        if typed_url and typed_url not in urls:
+            urls.insert(0, typed_url)
+
+        if not urls:
+            messagebox.showwarning("Missing URL", "Paste a YouTube URL first.")
+            return None
+
+        invalid = [url for url in urls if not is_supported_youtube_url(url)]
+        if invalid:
             messagebox.showwarning(
                 "Unsupported URL",
-                "Please paste a valid YouTube URL, for example https://youtube.com/... or https://youtu.be/...",
+                "В очереди есть ссылка, которая не похожа на YouTube:\n" + invalid[0],
             )
-            return
+            return None
+
+        save_directory = Path(self.save_dir_var.get().strip()).expanduser()
 
         if not self.save_dir_var.get().strip():
             messagebox.showwarning("Missing folder", "Choose a save directory first.")
-            return
+            return None
         if save_directory.exists() and not save_directory.is_dir():
             messagebox.showerror("Folder error", f"This path is not a folder:\n{save_directory}")
-            return
+            return None
 
         ok, missing = check_dependencies()
         if not ok:
             messagebox.showerror("Missing dependencies", dependency_instructions(missing))
-            return
+            return None
 
         if is_probably_external_drive(save_directory) and not self.temp_first_var.get():
             proceed = messagebox.askyesno(
@@ -310,29 +401,49 @@ class StreamDownloaderApp(tk.Tk):
                 "Do you want to continue anyway?",
             )
             if not proceed:
-                return
+                return None
 
         self._save_current_config()
-        self._clear_log()
-        self._write_log_file(
-            f"\n=== {APP_TITLE} {APP_VERSION} session {datetime.now().isoformat(timespec='seconds')} ===\n"
-            f"URL: {url}\n"
-            f"Save directory: {save_directory}\n"
-            f"Quality: {self.quality_var.get()}\n"
-            f"Format: {self.format_var.get()}\n"
-            f"Temp first: {self.temp_first_var.get()}\n\n"
-        )
+        return urls
+
+    def _start_next_download(self) -> None:
+        if not self.pending_urls:
+            self.download_button.configure(state="normal")
+            self.cancel_button.configure(state="disabled")
+            self._set_status("Finished")
+            messagebox.showinfo("Finished", "Очередь загрузок завершена.")
+            return
+
+        url = self.pending_urls.pop(0)
+        self._start_single_download(url)
+
+    def _start_single_download(self, url: str) -> None:
+        save_directory = Path(self.save_dir_var.get().strip()).expanduser()
+        self.active_url = url
         self.progress["value"] = 0
         self.percent_var.set("0%")
         self.last_output_file = None
         self.open_folder_button.configure(state="disabled")
+        self._set_status("Analyzing")
+        self._append_log(f"\n--- Новая загрузка ---\nURL: {url}\n")
+        analysis = self._analyze_video_sync(url)
+        estimated_size = None
+        if analysis:
+            estimated_size = analysis.get("estimated_size")
+            self.last_analysis_url = url
+            self.last_analysis_size = estimated_size
+            self._append_log(self._analysis_message(analysis) + "\n")
+        else:
+            self._append_log("Автоанализ не удался. Продолжаю без точной оценки размера.\n")
 
         request = DownloadRequest(
             url=url,
             save_directory=save_directory,
             quality=self.quality_var.get(),
             output_format=self.format_var.get(),
+            download_mode=self.mode_var.get(),
             use_temp_first=self.temp_first_var.get(),
+            estimated_size=estimated_size,
         )
 
         self.worker = DownloadWorker(
@@ -372,36 +483,13 @@ class StreamDownloaderApp(tk.Tk):
         thread.start()
 
     def _run_quality_check(self, url: str) -> None:
-        yt_dlp = find_executable("yt-dlp") or "yt-dlp"
-        command = [yt_dlp, "-F", "--no-color", url]
-        lines: list[str] = []
-
-        self.event_queue.put(("log", "Команда проверки:\n" + " ".join(command) + "\n\n"))
-        try:
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
-            )
-            assert process.stdout is not None
-            for line in process.stdout:
-                lines.append(line)
-                self.event_queue.put(("log", line))
-            return_code = process.wait()
-        except Exception as exc:
-            self.event_queue.put(("quality_result", (False, f"Не удалось проверить качества:\n{exc}", None, None)))
+        analysis = self._analyze_video_sync(url, emit_log=True)
+        if not analysis:
+            self.event_queue.put(("quality_result", (False, "Не удалось прочитать данные видео. Посмотри лог.", None, None, None)))
             return
 
-        output = "".join(lines)
-        if return_code != 0:
-            self.event_queue.put(("quality_result", (False, "Не удалось прочитать доступные форматы. Посмотри лог.", None, None)))
-            return
-
-        max_height = self._max_video_height_from_format_output(output)
+        raw_height = analysis.get("max_height")
+        max_height = raw_height if isinstance(raw_height, int) else None
         has_1440 = bool(max_height and max_height >= 1440)
         recommendation = self._recommended_quality_for_height(max_height)
         if max_height:
@@ -428,7 +516,109 @@ class StreamDownloaderApp(tk.Tk):
                 "Не удалось надежно определить максимальное качество по списку форматов.\n\n"
                 "Попробуй Quality: Best available."
             )
-        self.event_queue.put(("quality_result", (has_1440, message, max_height, recommendation)))
+        self.event_queue.put(("quality_result", (has_1440, message, max_height, recommendation, analysis)))
+
+    def _analyze_video_sync(self, url: str, emit_log: bool = False) -> dict[str, object] | None:
+        yt_dlp = find_executable("yt-dlp") or "yt-dlp"
+        command = [yt_dlp, "-J", "--no-playlist", "--no-warnings", url]
+        if emit_log:
+            self.event_queue.put(("log", "Команда анализа:\n" + " ".join(command) + "\n\n"))
+        try:
+            completed = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=45,
+                check=False,
+            )
+        except Exception as exc:
+            if emit_log:
+                self.event_queue.put(("log", f"Ошибка анализа: {exc}\n"))
+            return None
+
+        if completed.returncode != 0:
+            if emit_log:
+                self.event_queue.put(("log", completed.stderr + "\n"))
+            return None
+
+        try:
+            info = json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            return None
+
+        formats = info.get("formats") or []
+        heights: list[int] = []
+        fps_values: list[float] = []
+        known_sizes: list[int] = []
+        for item in formats:
+            if not isinstance(item, dict):
+                continue
+            height = item.get("height")
+            if isinstance(height, int) and 200 <= height <= 5000:
+                heights.append(height)
+            fps = item.get("fps")
+            if isinstance(fps, (int, float)) and fps > 0:
+                fps_values.append(float(fps))
+            size = item.get("filesize") or item.get("filesize_approx")
+            if isinstance(size, int) and size > 0:
+                known_sizes.append(size)
+
+        top_size = info.get("filesize") or info.get("filesize_approx")
+        if isinstance(top_size, int) and top_size > 0:
+            known_sizes.append(top_size)
+
+        estimated_size = max(known_sizes) if known_sizes else None
+        return {
+            "title": info.get("title") or "Unknown title",
+            "duration": info.get("duration"),
+            "max_height": max(heights) if heights else None,
+            "max_fps": max(fps_values) if fps_values else None,
+            "estimated_size": estimated_size,
+            "format_count": len(formats),
+        }
+
+    def _analysis_message(self, analysis: dict[str, object]) -> str:
+        title = analysis.get("title") or "Unknown title"
+        max_height = analysis.get("max_height")
+        max_fps = analysis.get("max_fps")
+        estimated_size = analysis.get("estimated_size")
+        duration = analysis.get("duration")
+        recommendation = self._recommended_quality_for_height(max_height if isinstance(max_height, int) else None)
+        lines = [
+            "Автоанализ видео:",
+            f"Название: {title}",
+            f"Максимальное качество: {max_height}p" if max_height else "Максимальное качество: не удалось определить",
+            f"FPS: {max_fps:g}" if isinstance(max_fps, float) else "FPS: не удалось определить",
+            f"Примерный размер: {self._format_bytes(estimated_size)}" if isinstance(estimated_size, int) else "Примерный размер: не удалось определить",
+            f"Длительность: {self._format_duration(duration)}" if isinstance(duration, (int, float)) else "Длительность: не удалось определить",
+            f"Рекомендация: Quality = {recommendation}",
+        ]
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_bytes(value: object) -> str:
+        if not isinstance(value, int) or value <= 0:
+            return "unknown"
+        units = ["B", "KiB", "MiB", "GiB", "TiB"]
+        size = float(value)
+        unit = units[0]
+        for unit in units:
+            if size < 1024 or unit == units[-1]:
+                break
+            size /= 1024
+        return f"{size:.2f} {unit}"
+
+    @staticmethod
+    def _format_duration(value: object) -> str:
+        seconds = int(value) if isinstance(value, (int, float)) else 0
+        hours, rem = divmod(seconds, 3600)
+        minutes, seconds = divmod(rem, 60)
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
 
     @staticmethod
     def _format_output_has_1440p(output: str) -> bool:
@@ -471,9 +661,37 @@ class StreamDownloaderApp(tk.Tk):
         return "Best available"
 
     def _cancel_download(self) -> None:
+        self.pending_urls.clear()
         if self.worker:
             self.worker.cancel()
         self.cancel_button.configure(state="disabled")
+
+    def _start_update_ytdlp(self) -> None:
+        self.update_ytdlp_button.configure(state="disabled")
+        self._append_log("\nПроверяю обновление yt-dlp...\n")
+        thread = threading.Thread(target=self._run_update_ytdlp, daemon=True)
+        thread.start()
+
+    def _run_update_ytdlp(self) -> None:
+        system = platform.system()
+        url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+        if system != "Windows":
+            url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+
+        target = get_user_tool_path("yt-dlp")
+        temp_target = target.with_suffix(target.suffix + ".download")
+        self.event_queue.put(("log", f"Скачиваю свежий yt-dlp:\n{url}\nВ файл:\n{target}\n\n"))
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            urllib.request.urlretrieve(url, temp_target)
+            if system != "Windows":
+                os.chmod(temp_target, 0o755)
+            temp_target.replace(target)
+        except Exception as exc:
+            self.event_queue.put(("update_ytdlp_result", (False, f"Не удалось обновить yt-dlp:\n{exc}")))
+            return
+
+        self.event_queue.put(("update_ytdlp_result", (True, f"yt-dlp обновлён внутри приложения:\n{target}")))
 
     def _process_events(self) -> None:
         try:
@@ -491,15 +709,31 @@ class StreamDownloaderApp(tk.Tk):
                     self._handle_finish(payload)  # type: ignore[arg-type]
                 elif event == "quality_result":
                     self._handle_quality_result(payload)  # type: ignore[arg-type]
+                elif event == "update_ytdlp_result":
+                    self._handle_update_ytdlp_result(payload)  # type: ignore[arg-type]
         except queue.Empty:
             pass
         self.after(100, self._process_events)
 
-    def _handle_quality_result(self, payload: tuple[bool, str, int | None, str | None]) -> None:
-        has_1440, message, max_height, recommendation = payload
+    def _handle_update_ytdlp_result(self, payload: tuple[bool, str]) -> None:
+        success, message = payload
+        self.update_ytdlp_button.configure(state="normal")
+        self._append_log("\n" + message + "\n")
+        if success:
+            messagebox.showinfo("yt-dlp", message)
+        else:
+            messagebox.showwarning("yt-dlp", message)
+
+    def _handle_quality_result(self, payload: tuple[bool, str, int | None, str | None, dict[str, object] | None]) -> None:
+        has_1440, message, max_height, recommendation, analysis = payload
         self.check_quality_button.configure(state="normal")
         self._set_status("Idle")
         self._append_log("\nРезультат проверки качества:\n" + message + "\n")
+        if analysis:
+            self.last_analysis_url = self.url_var.get().strip()
+            size = analysis.get("estimated_size")
+            self.last_analysis_size = size if isinstance(size, int) else None
+            self._append_log("\n" + self._analysis_message(analysis) + "\n")
         if max_height:
             self._append_log(f"Максимум найдено: {max_height}p\n")
         if recommendation:
@@ -510,7 +744,6 @@ class StreamDownloaderApp(tk.Tk):
             messagebox.showwarning("Рекомендация по качеству", message)
 
     def _handle_finish(self, result: DownloadResult) -> None:
-        self.download_button.configure(state="normal")
         self.cancel_button.configure(state="disabled")
 
         if result.output_file:
@@ -525,9 +758,16 @@ class StreamDownloaderApp(tk.Tk):
             if result.output_file:
                 self._append_log(f"Saved file: {result.output_file}\n")
             self._append_log(f"Log file: {self.log_file}\n")
-            messagebox.showinfo("Finished", result.message)
+            if self.pending_urls:
+                self._append_log(f"\nОсталось в очереди: {len(self.pending_urls)}\n")
+                self._start_next_download()
+                return
+            self.download_button.configure(state="normal")
+            messagebox.showinfo("Finished", "Все загрузки завершены.")
             return
 
+        self.download_button.configure(state="normal")
+        self.pending_urls.clear()
         if self.status_var.get() != STATUS_LABELS["Idle"]:
             self._set_status("Error")
         self._append_log(f"\n{result.message}\n")
@@ -556,6 +796,7 @@ class StreamDownloaderApp(tk.Tk):
                 save_directory=self.save_dir_var.get().strip(),
                 quality=self.quality_var.get(),
                 output_format=self.format_var.get(),
+                download_mode=self.mode_var.get(),
                 use_temp_first=self.temp_first_var.get(),
             )
         )

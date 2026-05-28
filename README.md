@@ -1,6 +1,6 @@
 # ERNI Stream Downloader for Windows
 
-Windows-версия ERNI Stream Downloader `1.1.0`.
+Windows-версия ERNI Stream Downloader `1.2.0`.
 
 Приложение скачивает ваши YouTube-стримы/видео через `yt-dlp` и `ffmpeg`, а затем делает совместимый `MP4` для обычных плееров и VEGAS Pro.
 
@@ -9,8 +9,16 @@ Windows-версия ERNI Stream Downloader `1.1.0`.
 ## Что делает
 
 - Скачивает YouTube-видео/стримы.
+- Поддерживает очередь: можно добавить несколько ссылок и скачать их подряд.
 - Поддерживает `Best available`, `1440p / 2K`, `1080p`, `720p`.
 - Поддерживает `MP4` и `MKV`.
+- Поддерживает режимы:
+  - `Для просмотра` — совместимый MP4 для обычных плееров;
+  - `Для VEGAS` — H.264/AAC/CFR, лучше для монтажа в VEGAS Pro;
+  - `Максимальное качество без перекодирования` — сохраняет максимально близко к YouTube-оригиналу.
+- Автоматически анализирует видео перед скачиванием: максимум качества, FPS, длительность и примерный размер.
+- Проверяет свободное место до начала скачивания.
+- Может обновлять `yt-dlp` из интерфейса.
 - Для `MP4` делает совместимый файл:
   - H.264 video;
   - AAC audio;
@@ -25,13 +33,21 @@ Windows-версия ERNI Stream Downloader `1.1.0`.
 
 ## Для обычного пользователя
 
-Если у вас уже есть готовый файл:
+Если у вас уже есть готовый installer:
+
+```text
+ERNI Stream Downloader Setup.exe
+```
+
+Откройте его и установите приложение. Python, `yt-dlp` и `ffmpeg` устанавливать не нужно.
+
+Если у вас только portable-файл:
 
 ```text
 ERNI Stream Downloader.exe
 ```
 
-Python, `yt-dlp` и `ffmpeg` устанавливать не нужно. Просто откройте `.exe`.
+его тоже можно просто открыть. Python, `yt-dlp` и `ffmpeg` устанавливать не нужно.
 
 Если Windows SmartScreen покажет предупреждение:
 
@@ -75,6 +91,26 @@ dist\ERNI Stream Downloader.exe
 ```
 
 Его можно отправлять другим людям.
+
+## Сборка installer
+
+Для настоящего установщика поставьте Inno Setup:
+
+```powershell
+winget install JRSoftware.InnoSetup
+```
+
+Потом снова запустите:
+
+```powershell
+.\build_windows.ps1
+```
+
+Готовый installer будет здесь:
+
+```text
+installer-output\ERNI Stream Downloader Setup.exe
+```
 
 ## Где лог
 

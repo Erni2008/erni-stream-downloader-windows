@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .config import get_config_dir
+
 
 EXTRA_TOOL_DIRS = [
     "/opt/homebrew/bin",
@@ -21,7 +23,8 @@ EXTRA_TOOL_DIRS = [
 def ensure_tool_path() -> None:
     """Make GUI-launched macOS apps see Homebrew/MacPorts command-line tools."""
     current_paths = os.environ.get("PATH", "").split(os.pathsep)
-    merged = current_paths[:]
+    user_tool_dir = str(get_user_tool_dir())
+    merged = [user_tool_dir] + current_paths[:]
     for tool_dir in EXTRA_TOOL_DIRS:
         if tool_dir not in merged:
             merged.append(tool_dir)
@@ -30,6 +33,10 @@ def ensure_tool_path() -> None:
 
 def find_executable(name: str) -> str | None:
     ensure_tool_path()
+    user_tool = get_user_tool_path(name)
+    if user_tool.exists() and os.access(user_tool, os.X_OK):
+        return str(user_tool)
+
     bundled = _find_bundled_executable(name)
     if bundled:
         return bundled
@@ -48,6 +55,15 @@ def find_executable(name: str) -> str | None:
             if candidate.exists() and os.access(candidate, os.X_OK):
                 return str(candidate)
     return None
+
+
+def get_user_tool_dir() -> Path:
+    return get_config_dir() / "tools"
+
+
+def get_user_tool_path(name: str) -> Path:
+    extension = ".exe" if platform.system() == "Windows" else ""
+    return get_user_tool_dir() / f"{name}{extension}"
 
 
 def _find_bundled_executable(name: str) -> str | None:
