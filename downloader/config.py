@@ -15,7 +15,7 @@ class AppConfig:
     save_directory: str = ""
     quality: str = "1440p / 2K"
     output_format: str = "MP4"
-    download_mode: str = "Универсальный MP4 для всего"
+    download_mode: str = "ВСЁ: максимально совместимый MP4"
     use_temp_first: bool = True
 
 

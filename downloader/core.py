@@ -29,7 +29,7 @@ QUALITY_FORMATS = {
 }
 
 DOWNLOAD_MODES = [
-    "Универсальный MP4 для всего",
+    "ВСЁ: максимально совместимый MP4",
     "Смотреть в плеере (MP4, видео + звук)",
     "Монтаж: Premiere / DaVinci / CapCut",
     "Монтаж: VEGAS Pro",
@@ -38,8 +38,8 @@ DOWNLOAD_MODES = [
 ]
 
 DOWNLOAD_MODE_DESCRIPTIONS = {
-    "Универсальный MP4 для всего": (
-        "Самый безопасный preset: один MP4 с видео + звуком, H.264 + AAC + constant FPS. Подходит для плееров, телефонов, соцсетей и большинства монтажных программ."
+    "ВСЁ: максимально совместимый MP4": (
+        "Выбирай, если не хочешь думать о формате. На выходе один MP4 с видео + звуком: H.264 + AAC + constant FPS + yuv420p. Подходит почти для всего: плееры, телефоны, соцсети, Premiere, DaVinci, CapCut, VEGAS, Final Cut."
     ),
     "Смотреть в плеере (MP4, видео + звук)": (
         "Готовый файл для обычного просмотра: H.264 + AAC, видео и звук в одном MP4."
@@ -357,7 +357,7 @@ class DownloadWorker:
         return "без перекодирования" in self.request.download_mode.lower() or self.request.download_mode.startswith("Архив:")
 
     def _is_editing_mode(self) -> bool:
-        return self.request.download_mode.startswith("Монтаж:") or self.request.download_mode == "Универсальный MP4 для всего"
+        return self.request.download_mode.startswith("Монтаж:") or self.request.download_mode == "ВСЁ: максимально совместимый MP4"
 
     def _run_process(self, command: list[str]) -> int:
         creationflags = 0
