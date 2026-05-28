@@ -29,10 +29,30 @@ QUALITY_FORMATS = {
 }
 
 DOWNLOAD_MODES = [
-    "Для просмотра",
-    "Для VEGAS",
-    "Максимальное качество без перекодирования",
+    "Смотреть в плеере (MP4, видео + звук)",
+    "Монтаж: Premiere / DaVinci / CapCut",
+    "Монтаж: VEGAS Pro",
+    "Монтаж: Final Cut / macOS",
+    "Архив: максимум качества без перекодирования",
 ]
+
+DOWNLOAD_MODE_DESCRIPTIONS = {
+    "Смотреть в плеере (MP4, видео + звук)": (
+        "Готовый файл для обычного просмотра: H.264 + AAC, видео и звук в одном MP4."
+    ),
+    "Монтаж: Premiere / DaVinci / CapCut": (
+        "Универсальный монтажный MP4: H.264 + AAC + constant FPS для Adobe Premiere, DaVinci Resolve и CapCut."
+    ),
+    "Монтаж: VEGAS Pro": (
+        "Самый совместимый вариант для VEGAS: H.264 + AAC + constant FPS + yuv420p."
+    ),
+    "Монтаж: Final Cut / macOS": (
+        "MP4, который легче открывается на macOS и в Final Cut: H.264 + AAC + faststart."
+    ),
+    "Архив: максимум качества без перекодирования": (
+        "Сохраняет максимально близко к оригиналу YouTube. Файл может быть неидеален для монтажных программ."
+    ),
+}
 
 
 @dataclass
@@ -220,7 +240,7 @@ class DownloadWorker:
     def _ensure_player_compatible_file(self, source: Path) -> Path:
         if self.request.output_format.upper() != "MP4":
             return source
-        if self.request.download_mode == "Максимальное качество без перекодирования":
+        if self._is_no_transcode_mode():
             self.on_log("\nSkipping MP4 compatibility conversion because no-transcode mode is selected.\n")
             return source
 
@@ -236,13 +256,17 @@ class DownloadWorker:
             final_target = self._unique_destination(final_target)
         temp_output = self._unique_destination(source.with_name(f"{source.stem}.encoding.mp4"))
         self.on_status("Converting")
-        if self.request.download_mode == "Для VEGAS":
+        if self.request.download_mode == "Монтаж: VEGAS Pro":
             self.on_log(
                 "\nMaking MP4 compatible with VEGAS Pro: H.264 video + AAC audio + constant frame rate...\n"
             )
+        elif self._is_editing_mode():
+            self.on_log(
+                "\nMaking MP4 compatible with editing apps: H.264 video + AAC audio + constant frame rate...\n"
+            )
         else:
             self.on_log(
-                "\nMaking MP4 compatible with standard players: H.264 video + AAC audio...\n"
+                "\nMaking MP4 compatible with standard players: H.264 video + AAC audio in one file...\n"
             )
 
         command = [
@@ -265,7 +289,7 @@ class DownloadWorker:
             "-pix_fmt",
             "yuv420p",
         ]
-        if self.request.download_mode == "Для VEGAS":
+        if self._is_editing_mode():
             command.extend(["-fps_mode", "cfr"])
         command.extend([
             "-c:a",
@@ -304,7 +328,7 @@ class DownloadWorker:
         required = int(source.stat().st_size * 1.35)
         if usage.free < required:
             raise RuntimeError(
-                "Not enough free space to create a VEGAS-compatible MP4.\n"
+                "Not enough free space to create a compatible MP4.\n"
                 f"Free space: {usage.free / (1024 ** 3):.1f} GB\n"
                 f"Recommended free space: {required / (1024 ** 3):.1f} GB"
             )
@@ -315,7 +339,7 @@ class DownloadWorker:
         usage = shutil.disk_usage(destination)
         multiplier = 2.6 if (
             self.request.output_format.upper() == "MP4"
-            and self.request.download_mode != "Максимальное качество без перекодирования"
+            and not self._is_no_transcode_mode()
         ) else 1.4
         required = int(self.request.estimated_size * multiplier)
         if usage.free < required:
@@ -324,6 +348,12 @@ class DownloadWorker:
                 f"Free space: {usage.free / (1024 ** 3):.1f} GB\n"
                 f"Recommended free space: {required / (1024 ** 3):.1f} GB"
             )
+
+    def _is_no_transcode_mode(self) -> bool:
+        return "без перекодирования" in self.request.download_mode.lower() or self.request.download_mode.startswith("Архив:")
+
+    def _is_editing_mode(self) -> bool:
+        return self.request.download_mode.startswith("Монтаж:")
 
     def _run_process(self, command: list[str]) -> int:
         creationflags = 0

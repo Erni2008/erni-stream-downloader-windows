@@ -14,7 +14,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from downloader.config import AppConfig, get_log_path, load_config, save_config
-from downloader.core import DOWNLOAD_MODES, DownloadRequest, DownloadResult, DownloadWorker, QUALITY_FORMATS
+from downloader.core import DOWNLOAD_MODE_DESCRIPTIONS, DOWNLOAD_MODES, DownloadRequest, DownloadResult, DownloadWorker, QUALITY_FORMATS
 from downloader.utils import (
     check_dependencies,
     dependency_instructions,
@@ -28,7 +28,7 @@ from downloader.utils import (
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 FORMATS = ["MP4", "MKV"]
 STATUS_LABELS = {
     "Idle": "Готово",
@@ -66,7 +66,11 @@ class StreamDownloaderApp(tk.Tk):
         self.save_dir_var = tk.StringVar(value=self.config_data.save_directory)
         self.quality_var = tk.StringVar(value=self.config_data.quality)
         self.format_var = tk.StringVar(value=self.config_data.output_format)
-        self.mode_var = tk.StringVar(value=self.config_data.download_mode)
+        initial_mode = self.config_data.download_mode
+        if initial_mode not in DOWNLOAD_MODES:
+            initial_mode = "Монтаж: VEGAS Pro"
+        self.mode_var = tk.StringVar(value=initial_mode)
+        self.mode_hint_var = tk.StringVar(value=DOWNLOAD_MODE_DESCRIPTIONS.get(initial_mode, ""))
         self.temp_first_var = tk.BooleanVar(value=self.config_data.use_temp_first)
         self.status_var = tk.StringVar(value=STATUS_LABELS["Idle"])
         self.percent_var = tk.StringVar(value="0%")
@@ -200,7 +204,7 @@ class StreamDownloaderApp(tk.Tk):
         tk.Label(header, text=f"v{APP_VERSION}", bg="#172338", fg="#dbeafe", padx=12, pady=6, font=("TkDefaultFont", 10, "bold")).grid(row=0, column=1, sticky="e")
         tk.Label(
             header,
-            text="Загрузка, анализ и подготовка YouTube-видео для просмотра, монтажа и VEGAS Pro.",
+            text="Загрузка, анализ и подготовка YouTube-видео для просмотра, монтажа и архива.",
             bg="#0f172a",
             fg="#b9c6d8",
             font=("TkDefaultFont", 12),
@@ -218,7 +222,7 @@ class StreamDownloaderApp(tk.Tk):
         tk.Label(form, text="Настройка загрузки", bg=panel, fg=ink, font=("TkDefaultFont", 18, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
         tk.Label(form, text="Вставь ссылку, выбери режим и запусти очередь.", bg=panel, fg=muted, font=("TkDefaultFont", 10)).grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 16))
 
-        labels = ["YouTube URL", "Save folder", "Quality", "Format", "Mode"]
+        labels = ["YouTube URL", "Save folder", "Quality", "Format", "Preset"]
         for index, text in enumerate(labels, start=2):
             tk.Label(form, text=text, bg=panel, fg=ink, font=("TkDefaultFont", 10, "bold")).grid(row=index, column=0, sticky="w", pady=8)
 
@@ -234,14 +238,24 @@ class StreamDownloaderApp(tk.Tk):
 
         format_box = ttk.Combobox(form, textvariable=self.format_var, values=FORMATS, state="readonly")
         format_box.grid(row=5, column=1, sticky="ew", padx=12, pady=8, ipady=6)
-        tk.Label(form, text="MP4 подходит для плееров и монтажа", bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=5, column=2, sticky="w", padx=(0, 4))
+        tk.Label(form, text="Итог: один файл с видео + звуком", bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=5, column=2, sticky="w", padx=(0, 4))
 
         mode_box = ttk.Combobox(form, textvariable=self.mode_var, values=DOWNLOAD_MODES, state="readonly")
         mode_box.grid(row=6, column=1, sticky="ew", padx=12, pady=8, ipady=6)
-        tk.Label(form, text="VEGAS = H.264/AAC/CFR", bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=6, column=2, sticky="w", padx=(0, 4))
+        mode_box.bind("<<ComboboxSelected>>", self._on_mode_changed)
+        tk.Label(form, text="Выбери под задачу", bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=6, column=2, sticky="w", padx=(0, 4))
+        tk.Label(
+            form,
+            textvariable=self.mode_hint_var,
+            bg=panel,
+            fg=muted,
+            wraplength=690,
+            justify="left",
+            font=("TkDefaultFont", 9),
+        ).grid(row=7, column=1, columnspan=2, sticky="w", padx=12, pady=(0, 8))
 
         option_box = tk.Frame(form, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
-        option_box.grid(row=7, column=1, columnspan=2, sticky="ew", padx=12, pady=(12, 4))
+        option_box.grid(row=8, column=1, columnspan=2, sticky="ew", padx=12, pady=(12, 4))
         tk.Checkbutton(
             option_box,
             text="Сначала скачать локально, потом скопировать в выбранную папку",
@@ -257,7 +271,7 @@ class StreamDownloaderApp(tk.Tk):
         tk.Label(option_box, text="Лучше для больших файлов, флешек и внешних дисков.", bg=soft, fg=muted, font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         action_row = tk.Frame(form, bg=panel)
-        action_row.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(18, 0))
+        action_row.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(18, 0))
         action_row.columnconfigure(5, weight=1)
         self.download_button = make_button(action_row, "Скачать", self._start_download, "primary")
         self.download_button.grid(row=0, column=0, padx=(0, 8))
@@ -302,7 +316,7 @@ class StreamDownloaderApp(tk.Tk):
         tk.Label(tips, text="Как качает", bg=soft, fg=ink, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
         tk.Label(
             tips,
-            text="В высоком качестве YouTube часто отдаёт видео и звук отдельно. Приложение скачивает оба потока и собирает итоговый файл через ffmpeg.",
+            text="В высоком качестве YouTube часто отдаёт видео и звук отдельно. Приложение скачивает оба потока и собирает один готовый файл с видео + звуком.",
             bg=soft,
             fg=muted,
             wraplength=270,
@@ -353,6 +367,10 @@ class StreamDownloaderApp(tk.Tk):
             return
         messagebox.showerror("Missing dependencies", dependency_instructions(missing))
         self._append_log(dependency_instructions(missing) + "\n")
+
+    def _on_mode_changed(self, _event: object | None = None) -> None:
+        mode = self.mode_var.get()
+        self.mode_hint_var.set(DOWNLOAD_MODE_DESCRIPTIONS.get(mode, ""))
 
     def _paste_url(self) -> None:
         try:

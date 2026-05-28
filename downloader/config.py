@@ -15,7 +15,7 @@ class AppConfig:
     save_directory: str = ""
     quality: str = "1440p / 2K"
     output_format: str = "MP4"
-    download_mode: str = "Для VEGAS"
+    download_mode: str = "Монтаж: VEGAS Pro"
     use_temp_first: bool = True
 
 
