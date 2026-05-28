@@ -28,7 +28,7 @@ from downloader.utils import (
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 FORMATS = ["MP4", "MKV"]
 STATUS_LABELS = {
     "Idle": "Готово",
@@ -68,7 +68,7 @@ class StreamDownloaderApp(tk.Tk):
         self.format_var = tk.StringVar(value=self.config_data.output_format)
         initial_mode = self.config_data.download_mode
         if initial_mode not in DOWNLOAD_MODES:
-            initial_mode = "Монтаж: VEGAS Pro"
+            initial_mode = "Универсальный MP4 для всего"
         self.mode_var = tk.StringVar(value=initial_mode)
         self.mode_hint_var = tk.StringVar(value=DOWNLOAD_MODE_DESCRIPTIONS.get(initial_mode, ""))
         self.temp_first_var = tk.BooleanVar(value=self.config_data.use_temp_first)
