@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 EXTRA_TOOL_DIRS = [
@@ -70,6 +71,14 @@ def check_dependencies() -> tuple[bool, list[str]]:
     if not find_executable("ffmpeg"):
         missing.append("ffmpeg")
     return not missing, missing
+
+
+def is_supported_youtube_url(url: str) -> bool:
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = parsed.netloc.lower()
+    return host in {"youtu.be", "www.youtu.be"} or host.endswith("youtube.com")
 
 
 def dependency_instructions(missing: list[str]) -> str:

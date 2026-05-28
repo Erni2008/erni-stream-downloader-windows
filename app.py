@@ -5,10 +5,11 @@ import re
 import subprocess
 import threading
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from downloader.config import AppConfig, load_config, save_config
+from downloader.config import AppConfig, get_log_path, load_config, save_config
 from downloader.core import DownloadRequest, DownloadResult, DownloadWorker, QUALITY_FORMATS
 from downloader.utils import (
     check_dependencies,
@@ -16,12 +17,24 @@ from downloader.utils import (
     ensure_tool_path,
     find_executable,
     is_probably_external_drive,
+    is_supported_youtube_url,
     open_folder,
 )
 
 
 APP_TITLE = "ERNI Stream Downloader"
+APP_VERSION = "1.1.0"
 FORMATS = ["MP4", "MKV"]
+STATUS_LABELS = {
+    "Idle": "Готово",
+    "Downloading": "Скачивание",
+    "Merging": "Склейка видео и звука",
+    "Converting": "Конвертация для MP4/VEGAS",
+    "Copying": "Копирование",
+    "Finished": "Готово",
+    "Error": "Ошибка",
+    "Cancelling": "Отмена",
+}
 
 
 class StreamDownloaderApp(tk.Tk):
@@ -36,13 +49,14 @@ class StreamDownloaderApp(tk.Tk):
         self.event_queue: queue.Queue[tuple[str, object]] = queue.Queue()
         self.worker: DownloadWorker | None = None
         self.last_output_file: Path | None = None
+        self.log_file = get_log_path()
 
         self.url_var = tk.StringVar()
         self.save_dir_var = tk.StringVar(value=self.config_data.save_directory)
         self.quality_var = tk.StringVar(value=self.config_data.quality)
         self.format_var = tk.StringVar(value=self.config_data.output_format)
         self.temp_first_var = tk.BooleanVar(value=self.config_data.use_temp_first)
-        self.status_var = tk.StringVar(value="Idle")
+        self.status_var = tk.StringVar(value=STATUS_LABELS["Idle"])
         self.percent_var = tk.StringVar(value="0%")
         self.tools_var = tk.StringVar(value="Checking tools...")
 
@@ -105,7 +119,7 @@ class StreamDownloaderApp(tk.Tk):
         header = ttk.Frame(root, style="App.TFrame")
         header.grid(row=0, column=0, sticky="ew", pady=(0, 18))
         header.columnconfigure(0, weight=1)
-        ttk.Label(header, text=APP_TITLE, style="Header.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text=f"{APP_TITLE} {APP_VERSION}", style="Header.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
             text="Download your own YouTube streams with yt-dlp + ffmpeg, without touching Terminal.",
@@ -244,9 +258,18 @@ class StreamDownloaderApp(tk.Tk):
         if not url:
             messagebox.showwarning("Missing URL", "Paste a YouTube URL first.")
             return
+        if not is_supported_youtube_url(url):
+            messagebox.showwarning(
+                "Unsupported URL",
+                "Please paste a valid YouTube URL, for example https://youtube.com/... or https://youtu.be/...",
+            )
+            return
 
         if not self.save_dir_var.get().strip():
             messagebox.showwarning("Missing folder", "Choose a save directory first.")
+            return
+        if save_directory.exists() and not save_directory.is_dir():
+            messagebox.showerror("Folder error", f"This path is not a folder:\n{save_directory}")
             return
 
         ok, missing = check_dependencies()
@@ -266,6 +289,14 @@ class StreamDownloaderApp(tk.Tk):
 
         self._save_current_config()
         self._clear_log()
+        self._write_log_file(
+            f"\n=== {APP_TITLE} {APP_VERSION} session {datetime.now().isoformat(timespec='seconds')} ===\n"
+            f"URL: {url}\n"
+            f"Save directory: {save_directory}\n"
+            f"Quality: {self.quality_var.get()}\n"
+            f"Format: {self.format_var.get()}\n"
+            f"Temp first: {self.temp_first_var.get()}\n\n"
+        )
         self.progress["value"] = 0
         self.percent_var.set("0%")
         self.last_output_file = None
@@ -288,13 +319,16 @@ class StreamDownloaderApp(tk.Tk):
         )
         self.download_button.configure(state="disabled")
         self.cancel_button.configure(state="normal")
-        self.status_var.set("Downloading")
+        self._set_status("Downloading")
         self.worker.start()
 
     def _start_quality_check(self) -> None:
         url = self.url_var.get().strip()
         if not url:
             messagebox.showwarning("Missing URL", "Paste a YouTube URL first.")
+            return
+        if not is_supported_youtube_url(url):
+            messagebox.showwarning("Unsupported URL", "Please paste a valid YouTube URL.")
             return
 
         ok, missing = check_dependencies()
@@ -427,7 +461,7 @@ class StreamDownloaderApp(tk.Tk):
                     self.progress["value"] = value
                     self.percent_var.set(f"{value:.1f}%")
                 elif event == "status":
-                    self.status_var.set(str(payload))
+                    self._set_status(str(payload))
                 elif event == "finish":
                     self._handle_finish(payload)  # type: ignore[arg-type]
                 elif event == "quality_result":
@@ -439,7 +473,7 @@ class StreamDownloaderApp(tk.Tk):
     def _handle_quality_result(self, payload: tuple[bool, str, int | None, str | None]) -> None:
         has_1440, message, max_height, recommendation = payload
         self.check_quality_button.configure(state="normal")
-        self.status_var.set("Idle")
+        self._set_status("Idle")
         self._append_log("\nРезультат проверки качества:\n" + message + "\n")
         if max_height:
             self._append_log(f"Максимум найдено: {max_height}p\n")
@@ -461,16 +495,18 @@ class StreamDownloaderApp(tk.Tk):
         if result.success:
             self.progress["value"] = 100
             self.percent_var.set("100%")
-            self.status_var.set("Finished")
+            self._set_status("Finished")
             self._append_log(f"\n{result.message}\n")
             if result.output_file:
                 self._append_log(f"Saved file: {result.output_file}\n")
+            self._append_log(f"Log file: {self.log_file}\n")
             messagebox.showinfo("Finished", result.message)
             return
 
-        if self.status_var.get() != "Idle":
-            self.status_var.set("Error")
+        if self.status_var.get() != STATUS_LABELS["Idle"]:
+            self._set_status("Error")
         self._append_log(f"\n{result.message}\n")
+        self._append_log(f"Log file: {self.log_file}\n")
         messagebox.showerror("Download error", result.message)
 
     def _open_output_folder(self) -> None:
@@ -513,11 +549,23 @@ class StreamDownloaderApp(tk.Tk):
         self.log_text.insert("end", text)
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
+        self._write_log_file(text)
 
     def _clear_log(self) -> None:
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
+
+    def _set_status(self, status: str) -> None:
+        self.status_var.set(STATUS_LABELS.get(status, status))
+
+    def _write_log_file(self, text: str) -> None:
+        try:
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            with self.log_file.open("a", encoding="utf-8") as file:
+                file.write(text)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

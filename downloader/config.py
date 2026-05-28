@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -22,11 +23,9 @@ def get_config_dir() -> Path:
     home = Path.home()
 
     # Windows normally has APPDATA. Keep a sensible fallback for portable setups.
-    import os
-
     appdata = os.environ.get("APPDATA")
     if appdata:
-      return Path(appdata) / APP_DIR_NAME
+        return Path(appdata) / APP_DIR_NAME
 
     if (home / "Library" / "Application Support").exists():
         return home / "Library" / "Application Support" / APP_DIR_NAME
@@ -36,6 +35,10 @@ def get_config_dir() -> Path:
 
 def get_config_path() -> Path:
     return get_config_dir() / CONFIG_FILE_NAME
+
+
+def get_log_path() -> Path:
+    return get_config_dir() / "app.log"
 
 
 def load_config() -> AppConfig:
@@ -57,4 +60,3 @@ def save_config(config: AppConfig) -> None:
     path = get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
-

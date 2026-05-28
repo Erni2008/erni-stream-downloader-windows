@@ -51,6 +51,7 @@ if (!(Test-Path $ffmpegExe)) {
 
 & $pythonExe @pythonArgs -m PyInstaller `
   --noconfirm `
+  --clean `
   --onefile `
   --windowed `
   --name "ERNI Stream Downloader" `

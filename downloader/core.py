@@ -45,6 +45,7 @@ class DownloadResult:
     output_file: Path | None = None
     temp_directory: Path | None = None
     raw_output: str = ""
+    log_file: Path | None = None
 
 
 class DownloadWorker:
@@ -216,7 +217,11 @@ class DownloadWorker:
                 "ffmpeg is required to make MP4 files compatible with Windows/macOS players."
             )
 
-        compatible = self._unique_destination(source.with_name(f"{source.stem}.compatible.mp4"))
+        self._ensure_conversion_space(source)
+        final_target = source.with_suffix(".mp4")
+        if final_target != source and final_target.exists():
+            final_target = self._unique_destination(final_target)
+        temp_output = self._unique_destination(source.with_name(f"{source.stem}.encoding.mp4"))
         self.on_status("Converting")
         self.on_log(
             "\nMaking MP4 compatible with standard players and VEGAS Pro: H.264 video + AAC audio + constant frame rate...\n"
@@ -253,21 +258,36 @@ class DownloadWorker:
             "2",
             "-movflags",
             "+faststart",
-            str(compatible),
+            str(temp_output),
         ]
 
         return_code = self._run_process(command)
         if self._cancel_requested.is_set():
-            compatible.unlink(missing_ok=True)
+            temp_output.unlink(missing_ok=True)
             raise RuntimeError("Conversion cancelled.")
-        if return_code != 0 or not compatible.exists():
-            compatible.unlink(missing_ok=True)
+        if return_code != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
+            temp_output.unlink(missing_ok=True)
             raise RuntimeError(
                 "ffmpeg could not create a compatible MP4 file. Try MKV, or send the log for debugging."
             )
 
         source.unlink(missing_ok=True)
-        return compatible
+        if final_target == source:
+            temp_output.replace(final_target)
+            return final_target
+        temp_output.rename(final_target)
+        return final_target
+
+    @staticmethod
+    def _ensure_conversion_space(source: Path) -> None:
+        usage = shutil.disk_usage(source.parent)
+        required = int(source.stat().st_size * 1.35)
+        if usage.free < required:
+            raise RuntimeError(
+                "Not enough free space to create a VEGAS-compatible MP4.\n"
+                f"Free space: {usage.free / (1024 ** 3):.1f} GB\n"
+                f"Recommended free space: {required / (1024 ** 3):.1f} GB"
+            )
 
     def _run_process(self, command: list[str]) -> int:
         creationflags = 0
@@ -302,6 +322,10 @@ class DownloadWorker:
         return self._process.wait()
 
     def _parse_progress_line(self, line: str) -> None:
+        if "Making MP4 compatible" in line:
+            self.on_status("Converting")
+            return
+
         if "[Merger]" in line or "Merging formats into" in line:
             self.on_status("Merging")
             return
