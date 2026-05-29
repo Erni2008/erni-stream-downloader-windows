@@ -13,6 +13,12 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+try:
+    from tkinterdnd2 import DND_TEXT, TkinterDnD
+except Exception:  # Drag-and-drop stays optional.
+    DND_TEXT = None
+    TkinterDnD = None
+
 from downloader.config import AppConfig, get_log_path, load_config, load_history, save_config, save_history
 from downloader.core import DOWNLOAD_MODE_DESCRIPTIONS, DOWNLOAD_MODES, DownloadRequest, DownloadResult, DownloadWorker, QUALITY_FORMATS
 from downloader.media import MediaReport, probe_media, repair_to_universal_mp4, report_to_text
@@ -29,14 +35,14 @@ from downloader.utils import (
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.4.0"
 GITHUB_RELEASES = {
     "Darwin": "https://api.github.com/repos/Erni2008/erni-stream-downloader-macos/releases/latest",
     "Windows": "https://api.github.com/repos/Erni2008/erni-stream-downloader-windows/releases/latest",
 }
 FORMATS = ["MP4", "MKV"]
 STATUS_LABELS = {
-    "Idle": "Готово",
+    "Idle": "Ready",
     "Downloading": "Скачивание",
     "Merging": "Склейка видео и звука",
     "Converting": "Конвертация для MP4/VEGAS",
@@ -47,8 +53,119 @@ STATUS_LABELS = {
     "Analyzing": "Анализ видео",
 }
 
+BaseTk = TkinterDnD.Tk if TkinterDnD else tk.Tk
 
-class StreamDownloaderApp(tk.Tk):
+I18N = {
+    "RU": {
+        "subtitle": "Профессиональная загрузка YouTube-видео для просмотра, монтажа и архива.",
+        "setup_title": "Настройка загрузки",
+        "setup_subtitle": "Вставь ссылку, выбери режим и запусти очередь. Можно перетащить ссылку прямо в окно.",
+        "paste": "Вставить",
+        "browse": "Выбрать",
+        "analyze": "Проверить",
+        "format_hint": "На выходе: один файл с видео + звуком",
+        "preset_hint": "Выбери под задачу",
+        "temp_first": "Сначала скачать локально, потом скопировать в выбранную папку",
+        "temp_hint": "Рекомендуется для больших файлов, флешек и внешних дисков.",
+        "download": "Скачать",
+        "analyze_video": "Проверить видео",
+        "cancel": "Отмена",
+        "folder": "Папка",
+        "update_ytdlp": "Обновить yt-dlp",
+        "update_app": "Обновить app",
+        "check_file": "Проверить файл",
+        "repair_file": "Починить видео",
+        "log": "Лог",
+        "queue": "Очередь",
+        "queue_subtitle": "Добавь несколько ссылок и скачивай их по очереди.",
+        "link": "Ссылка",
+        "status": "Статус",
+        "quality": "Качество",
+        "size": "Размер",
+        "done": "Готово",
+        "how": "Как работает",
+        "how_text": "В высоком качестве YouTube часто отдаёт видео и звук отдельно. Приложение скачивает оба потока и собирает один финальный файл с видео + звуком.",
+        "history": "История",
+        "open": "Открыть",
+        "repeat": "Повторить",
+        "progress": "ПРОГРЕСС",
+        "download_log": "Журнал загрузки",
+        "language": "Язык",
+        "youtube_url": "YouTube URL",
+        "save_folder": "Папка сохранения",
+        "format": "Формат",
+        "preset": "Режим",
+        "remove": "Удалить",
+        "clear": "Очистить",
+        "drop_ready": "Перетащи сюда YouTube-ссылку или текст",
+        "drop_added": "Добавлено из drag-and-drop",
+        "status_ready": "Готово",
+        "status_downloading": "Скачивание",
+        "status_merging": "Склейка видео и звука",
+        "status_converting": "Конвертация",
+        "status_copying": "Копирование",
+        "status_finished": "Готово",
+        "status_error": "Ошибка",
+        "status_cancelling": "Отмена",
+        "status_analyzing": "Анализ видео",
+    },
+    "EN": {
+        "subtitle": "Download, inspect, and prepare YouTube videos for playback, editing, and archiving.",
+        "setup_title": "Download setup",
+        "setup_subtitle": "Paste a link, choose a preset, and start the queue. You can drop a link directly into the window.",
+        "paste": "Paste",
+        "browse": "Browse",
+        "analyze": "Analyze",
+        "format_hint": "Output: one file with video + audio",
+        "preset_hint": "Choose by task",
+        "temp_first": "Download locally first, then copy to selected folder",
+        "temp_hint": "Recommended for large files, USB drives, and external disks.",
+        "download": "Download",
+        "analyze_video": "Analyze video",
+        "cancel": "Cancel",
+        "folder": "Folder",
+        "update_ytdlp": "Update yt-dlp",
+        "update_app": "Update app",
+        "check_file": "Check file",
+        "repair_file": "Repair video",
+        "log": "Log",
+        "queue": "Queue",
+        "queue_subtitle": "Add several links and download them one by one.",
+        "link": "Link",
+        "status": "Status",
+        "quality": "Quality",
+        "size": "Size",
+        "done": "Done",
+        "how": "How it works",
+        "how_text": "At high quality YouTube often provides video and audio separately. The app downloads both streams and builds one final file with video + audio.",
+        "history": "History",
+        "open": "Open",
+        "repeat": "Repeat",
+        "progress": "PROGRESS",
+        "download_log": "Download log",
+        "language": "Language",
+        "youtube_url": "YouTube URL",
+        "save_folder": "Save folder",
+        "format": "Format",
+        "preset": "Mode",
+        "remove": "Remove",
+        "clear": "Clear",
+        "drop_ready": "Drop a YouTube link or text here",
+        "drop_added": "Added from drag-and-drop",
+        "status_ready": "Ready",
+        "status_downloading": "Downloading",
+        "status_merging": "Merging video and audio",
+        "status_converting": "Converting",
+        "status_copying": "Copying",
+        "status_finished": "Finished",
+        "status_error": "Error",
+        "status_cancelling": "Cancelling",
+        "status_analyzing": "Analyzing video",
+    },
+}
+
+
+class StreamDownloaderApp(BaseTk):
     def __init__(self) -> None:
         super().__init__()
         ensure_tool_path()
@@ -79,8 +196,10 @@ class StreamDownloaderApp(tk.Tk):
             initial_mode = "ВСЁ: максимально совместимый MP4"
         self.mode_var = tk.StringVar(value=initial_mode)
         self.mode_hint_var = tk.StringVar(value=DOWNLOAD_MODE_DESCRIPTIONS.get(initial_mode, ""))
+        self.language_var = tk.StringVar(value=self.config_data.language if self.config_data.language in I18N else "RU")
         self.temp_first_var = tk.BooleanVar(value=self.config_data.use_temp_first)
-        self.status_var = tk.StringVar(value=STATUS_LABELS["Idle"])
+        self.status_key = "Idle"
+        self.status_var = tk.StringVar(value=self._status_label("Idle"))
         self.percent_var = tk.StringVar(value="0%")
         self.tools_var = tk.StringVar(value="Checking tools...")
 
@@ -88,6 +207,24 @@ class StreamDownloaderApp(tk.Tk):
         self._build_ui()
         self._check_dependencies_on_start()
         self.after(100, self._process_events)
+
+    def t(self, key: str) -> str:
+        return I18N.get(self.language_var.get(), I18N["RU"]).get(key, I18N["RU"].get(key, key))
+
+    def _status_label(self, status: str) -> str:
+        status_keys = {
+            "Idle": "status_ready",
+            "Downloading": "status_downloading",
+            "Merging": "status_merging",
+            "Converting": "status_converting",
+            "Copying": "status_copying",
+            "Finished": "status_finished",
+            "Error": "status_error",
+            "Cancelling": "status_cancelling",
+            "Analyzing": "status_analyzing",
+        }
+        key = status_keys.get(status)
+        return self.t(key) if key else STATUS_LABELS.get(status, status)
 
     def _configure_style(self) -> None:
         self.configure(bg="#eef3f8")
@@ -210,13 +347,19 @@ class StreamDownloaderApp(tk.Tk):
         header.columnconfigure(0, weight=1)
         tk.Label(header, text=APP_TITLE, bg="#0f172a", fg="#ffffff", font=("TkDefaultFont", 26, "bold")).grid(row=0, column=0, sticky="w")
         tk.Label(header, text=f"v{APP_VERSION}", bg="#172338", fg="#dbeafe", padx=12, pady=6, font=("TkDefaultFont", 10, "bold")).grid(row=0, column=1, sticky="e")
+        language_frame = tk.Frame(header, bg="#0f172a")
+        language_frame.grid(row=0, column=2, sticky="e", padx=(12, 0))
+        tk.Label(language_frame, text=self.t("language"), bg="#0f172a", fg="#b9c6d8", font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, sticky="e", padx=(0, 8))
+        language_box = ttk.Combobox(language_frame, textvariable=self.language_var, values=["RU", "EN"], state="readonly", width=5)
+        language_box.grid(row=0, column=1, sticky="e")
+        language_box.bind("<<ComboboxSelected>>", self._on_language_changed)
         tk.Label(
             header,
-            text="Загрузка, анализ и подготовка YouTube-видео для просмотра, монтажа и архива.",
+            text=self.t("subtitle"),
             bg="#0f172a",
             fg="#b9c6d8",
             font=("TkDefaultFont", 12),
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(7, 0))
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(7, 0))
 
         main = tk.Frame(shell, bg=bg)
         main.grid(row=1, column=0, sticky="nsew", pady=(18, 14))
@@ -227,31 +370,40 @@ class StreamDownloaderApp(tk.Tk):
         form.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
         form.columnconfigure(1, weight=1)
 
-        tk.Label(form, text="Настройка загрузки", bg=panel, fg=ink, font=("TkDefaultFont", 18, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
-        tk.Label(form, text="Вставь ссылку, выбери режим и запусти очередь.", bg=panel, fg=muted, font=("TkDefaultFont", 10)).grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 16))
+        tk.Label(form, text=self.t("setup_title"), bg=panel, fg=ink, font=("TkDefaultFont", 18, "bold")).grid(row=0, column=0, columnspan=2, sticky="w")
+        tk.Label(
+            form,
+            text=self.t("drop_ready"),
+            bg="#e8f1ff",
+            fg="#185abc",
+            padx=12,
+            pady=7,
+            font=("TkDefaultFont", 9, "bold"),
+        ).grid(row=0, column=2, sticky="e")
+        tk.Label(form, text=self.t("setup_subtitle"), bg=panel, fg=muted, font=("TkDefaultFont", 10)).grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 16))
 
-        labels = ["YouTube URL", "Save folder", "Quality", "Format", "Preset"]
+        labels = [self.t("youtube_url"), self.t("save_folder"), self.t("quality"), self.t("format"), self.t("preset")]
         for index, text in enumerate(labels, start=2):
             tk.Label(form, text=text, bg=panel, fg=ink, font=("TkDefaultFont", 10, "bold")).grid(row=index, column=0, sticky="w", pady=8)
 
         make_entry(form, self.url_var).grid(row=2, column=1, sticky="ew", padx=12, pady=8, ipady=10)
-        make_button(form, "Вставить", self._paste_url).grid(row=2, column=2, sticky="ew", pady=8)
+        make_button(form, self.t("paste"), self._paste_url).grid(row=2, column=2, sticky="ew", pady=8)
 
         make_entry(form, self.save_dir_var).grid(row=3, column=1, sticky="ew", padx=12, pady=8, ipady=10)
-        make_button(form, "Выбрать", self._browse_directory).grid(row=3, column=2, sticky="ew", pady=8)
+        make_button(form, self.t("browse"), self._browse_directory).grid(row=3, column=2, sticky="ew", pady=8)
 
         quality_box = ttk.Combobox(form, textvariable=self.quality_var, values=list(QUALITY_FORMATS.keys()), state="readonly")
         quality_box.grid(row=4, column=1, sticky="ew", padx=12, pady=8, ipady=6)
-        make_button(form, "Анализ", self._start_quality_check).grid(row=4, column=2, sticky="ew", pady=8)
+        make_button(form, self.t("analyze"), self._start_quality_check).grid(row=4, column=2, sticky="ew", pady=8)
 
         format_box = ttk.Combobox(form, textvariable=self.format_var, values=FORMATS, state="readonly")
         format_box.grid(row=5, column=1, sticky="ew", padx=12, pady=8, ipady=6)
-        tk.Label(form, text="Итог: один файл с видео + звуком", bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=5, column=2, sticky="w", padx=(0, 4))
+        tk.Label(form, text=self.t("format_hint"), bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=5, column=2, sticky="w", padx=(0, 4))
 
         mode_box = ttk.Combobox(form, textvariable=self.mode_var, values=DOWNLOAD_MODES, state="readonly")
         mode_box.grid(row=6, column=1, sticky="ew", padx=12, pady=8, ipady=6)
         mode_box.bind("<<ComboboxSelected>>", self._on_mode_changed)
-        tk.Label(form, text="Выбери под задачу", bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=6, column=2, sticky="w", padx=(0, 4))
+        tk.Label(form, text=self.t("preset_hint"), bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=6, column=2, sticky="w", padx=(0, 4))
         tk.Label(
             form,
             textvariable=self.mode_hint_var,
@@ -266,7 +418,7 @@ class StreamDownloaderApp(tk.Tk):
         option_box.grid(row=8, column=1, columnspan=2, sticky="ew", padx=12, pady=(12, 4))
         tk.Checkbutton(
             option_box,
-            text="Сначала скачать локально, потом скопировать в выбранную папку",
+            text=self.t("temp_first"),
             variable=self.temp_first_var,
             bg=soft,
             fg=ink,
@@ -276,47 +428,47 @@ class StreamDownloaderApp(tk.Tk):
             relief="flat",
             bd=0,
         ).grid(row=0, column=0, sticky="w")
-        tk.Label(option_box, text="Лучше для больших файлов, флешек и внешних дисков.", bg=soft, fg=muted, font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        tk.Label(option_box, text=self.t("temp_hint"), bg=soft, fg=muted, font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         action_row = tk.Frame(form, bg=panel)
         action_row.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(18, 0))
         action_row.columnconfigure(8, weight=1)
-        self.download_button = make_button(action_row, "Скачать", self._start_download, "primary")
+        self.download_button = make_button(action_row, self.t("download"), self._start_download, "primary")
         self.download_button.grid(row=0, column=0, padx=(0, 8))
-        self.check_quality_button = make_button(action_row, "Анализ видео", self._start_quality_check)
+        self.check_quality_button = make_button(action_row, self.t("analyze_video"), self._start_quality_check)
         self.check_quality_button.grid(row=0, column=1, padx=(0, 8))
-        self.cancel_button = make_button(action_row, "Отмена", self._cancel_download, "danger", state="disabled")
+        self.cancel_button = make_button(action_row, self.t("cancel"), self._cancel_download, "danger", state="disabled")
         self.cancel_button.grid(row=0, column=2, padx=(0, 8))
-        self.open_folder_button = make_button(action_row, "Папка", self._open_output_folder, state="disabled")
+        self.open_folder_button = make_button(action_row, self.t("folder"), self._open_output_folder, state="disabled")
         self.open_folder_button.grid(row=0, column=3, padx=(0, 8))
-        self.update_ytdlp_button = make_button(action_row, "Обновить yt-dlp", self._start_update_ytdlp)
+        self.update_ytdlp_button = make_button(action_row, self.t("update_ytdlp"), self._start_update_ytdlp)
         self.update_ytdlp_button.grid(row=0, column=4, padx=(0, 8))
-        self.check_update_button = make_button(action_row, "Обновить app", self._start_app_update_check)
+        self.check_update_button = make_button(action_row, self.t("update_app"), self._start_app_update_check)
         self.check_update_button.grid(row=0, column=5, padx=(0, 8))
-        self.probe_file_button = make_button(action_row, "Проверить файл", self._select_and_probe_file)
+        self.probe_file_button = make_button(action_row, self.t("check_file"), self._select_and_probe_file)
         self.probe_file_button.grid(row=0, column=6, padx=(0, 8))
-        self.repair_file_button = make_button(action_row, "Починить видео", self._select_and_repair_file)
+        self.repair_file_button = make_button(action_row, self.t("repair_file"), self._select_and_repair_file)
         self.repair_file_button.grid(row=0, column=7, padx=(0, 8))
-        self.open_log_button = make_button(action_row, "Лог", self._open_log_folder, "ghost")
+        self.open_log_button = make_button(action_row, self.t("log"), self._open_log_folder, "ghost")
         self.open_log_button.grid(row=0, column=8, sticky="e")
 
         side = tk.Frame(main, bg=panel, padx=18, pady=18, highlightthickness=1, highlightbackground="#e1e8f2")
         side.grid(row=0, column=1, sticky="nsew")
         side.columnconfigure(0, weight=1)
         tk.Label(side, textvariable=self.tools_var, bg="#e8f1ff", fg="#185abc", padx=12, pady=8, font=("TkDefaultFont", 10, "bold")).grid(row=0, column=0, sticky="ew")
-        tk.Label(side, text="Очередь", bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=1, column=0, sticky="w", pady=(18, 6))
-        tk.Label(side, text="Добавляй несколько ссылок и скачивай подряд.", bg=panel, fg=muted, wraplength=260, justify="left", font=("TkDefaultFont", 10)).grid(row=2, column=0, sticky="w")
+        tk.Label(side, text=self.t("queue"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=1, column=0, sticky="w", pady=(18, 6))
+        tk.Label(side, text=self.t("queue_subtitle"), bg=panel, fg=muted, wraplength=260, justify="left", font=("TkDefaultFont", 10)).grid(row=2, column=0, sticky="w")
         self.queue_table = ttk.Treeview(
             side,
             columns=("status", "quality", "size", "progress"),
             show="tree headings",
             height=7,
         )
-        self.queue_table.heading("#0", text="Ссылка")
-        self.queue_table.heading("status", text="Статус")
-        self.queue_table.heading("quality", text="Качество")
-        self.queue_table.heading("size", text="Размер")
-        self.queue_table.heading("progress", text="Готово")
+        self.queue_table.heading("#0", text=self.t("link"))
+        self.queue_table.heading("status", text=self.t("status"))
+        self.queue_table.heading("quality", text=self.t("quality"))
+        self.queue_table.heading("size", text=self.t("size"))
+        self.queue_table.heading("progress", text=self.t("done"))
         self.queue_table.column("#0", width=190, minwidth=140, stretch=True)
         self.queue_table.column("status", width=82, minwidth=70, stretch=False)
         self.queue_table.column("quality", width=90, minwidth=80, stretch=False)
@@ -327,15 +479,15 @@ class StreamDownloaderApp(tk.Tk):
         queue_buttons.grid(row=4, column=0, sticky="ew")
         queue_buttons.columnconfigure((0, 1, 2), weight=1)
         make_button(queue_buttons, "+", self._add_url_to_queue, "secondary").grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        make_button(queue_buttons, "Удалить", self._remove_selected_queue_item, "secondary").grid(row=0, column=1, sticky="ew", padx=(0, 6))
-        make_button(queue_buttons, "Очистить", self._clear_queue_items, "secondary").grid(row=0, column=2, sticky="ew")
+        make_button(queue_buttons, self.t("remove"), self._remove_selected_queue_item, "secondary").grid(row=0, column=1, sticky="ew", padx=(0, 6))
+        make_button(queue_buttons, self.t("clear"), self._clear_queue_items, "secondary").grid(row=0, column=2, sticky="ew")
 
         tips = tk.Frame(side, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
         tips.grid(row=5, column=0, sticky="ew", pady=(18, 0))
-        tk.Label(tips, text="Как качает", bg=soft, fg=ink, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(tips, text=self.t("how"), bg=soft, fg=ink, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
         tk.Label(
             tips,
-            text="В высоком качестве YouTube часто отдаёт видео и звук отдельно. Приложение скачивает оба потока и собирает один готовый файл с видео + звуком.",
+            text=self.t("how_text"),
             bg=soft,
             fg=muted,
             wraplength=270,
@@ -343,7 +495,7 @@ class StreamDownloaderApp(tk.Tk):
             font=("TkDefaultFont", 9),
         ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
-        tk.Label(side, text="История", bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=6, column=0, sticky="w", pady=(18, 6))
+        tk.Label(side, text=self.t("history"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=6, column=0, sticky="w", pady=(18, 6))
         self.history_listbox = tk.Listbox(
             side,
             height=5,
@@ -360,16 +512,16 @@ class StreamDownloaderApp(tk.Tk):
         history_buttons = tk.Frame(side, bg=panel)
         history_buttons.grid(row=8, column=0, sticky="ew")
         history_buttons.columnconfigure((0, 1, 2), weight=1)
-        make_button(history_buttons, "Открыть", self._open_history_file, "secondary").grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        make_button(history_buttons, "Папка", self._open_history_folder, "secondary").grid(row=0, column=1, sticky="ew", padx=(0, 6))
-        make_button(history_buttons, "Повторить", self._repeat_history_url, "secondary").grid(row=0, column=2, sticky="ew")
+        make_button(history_buttons, self.t("open"), self._open_history_file, "secondary").grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        make_button(history_buttons, self.t("folder"), self._open_history_folder, "secondary").grid(row=0, column=1, sticky="ew", padx=(0, 6))
+        make_button(history_buttons, self.t("repeat"), self._repeat_history_url, "secondary").grid(row=0, column=2, sticky="ew")
 
         status_frame = tk.Frame(shell, bg=panel, padx=18, pady=16, highlightthickness=1, highlightbackground="#e1e8f2")
         status_frame.grid(row=2, column=0, sticky="ew", pady=(0, 14))
         status_frame.columnconfigure(0, weight=1)
         status_frame.columnconfigure(1, weight=1)
-        tk.Label(status_frame, text="СТАТУС", bg=panel, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, sticky="w")
-        tk.Label(status_frame, text="ПРОГРЕСС", bg=panel, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=1, sticky="w", padx=(18, 0))
+        tk.Label(status_frame, text=self.t("status").upper(), bg=panel, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(status_frame, text=self.t("progress"), bg=panel, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=1, sticky="w", padx=(18, 0))
         tk.Label(status_frame, textvariable=self.status_var, bg=panel, fg=ink, font=("TkDefaultFont", 13, "bold")).grid(row=1, column=0, sticky="w", pady=(4, 0))
         tk.Label(status_frame, textvariable=self.percent_var, bg=panel, fg=ink, font=("TkDefaultFont", 13, "bold")).grid(row=1, column=1, sticky="w", padx=(18, 0), pady=(4, 0))
         self.progress = ttk.Progressbar(status_frame, mode="determinate", maximum=100)
@@ -380,7 +532,7 @@ class StreamDownloaderApp(tk.Tk):
         log_panel.columnconfigure(0, weight=1)
         log_panel.rowconfigure(1, weight=1)
         shell.rowconfigure(3, weight=1)
-        tk.Label(log_panel, text="Журнал загрузки", bg=panel, fg=ink, font=("TkDefaultFont", 13, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 10))
+        tk.Label(log_panel, text=self.t("download_log"), bg=panel, fg=ink, font=("TkDefaultFont", 13, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 10))
         self.log_text = tk.Text(
             log_panel,
             wrap="word",
@@ -400,6 +552,7 @@ class StreamDownloaderApp(tk.Tk):
         self.log_text.configure(yscrollcommand=scrollbar.set)
         self._refresh_history()
         self._refresh_tool_status()
+        self._enable_drag_and_drop(root)
 
     def _check_dependencies_on_start(self) -> None:
         ok, missing = check_dependencies()
@@ -408,6 +561,62 @@ class StreamDownloaderApp(tk.Tk):
             return
         messagebox.showerror("Missing dependencies", dependency_instructions(missing))
         self._append_log(dependency_instructions(missing) + "\n")
+
+    def _on_language_changed(self, _event: object | None = None) -> None:
+        self._save_current_config()
+        self.status_var.set(self._status_label(self.status_key))
+        for child in self.winfo_children():
+            child.destroy()
+        self._configure_style()
+        self._build_ui()
+        self._append_log(f"{self.t('language')}: {self.language_var.get()}\n")
+
+    def _enable_drag_and_drop(self, root: tk.Widget) -> None:
+        if not DND_TEXT:
+            self._append_log("Drag-and-drop недоступен: установи tkinterdnd2 из requirements.txt.\n")
+            return
+
+        def register_tree(widget: tk.Widget) -> None:
+            try:
+                widget.drop_target_register(DND_TEXT)  # type: ignore[attr-defined]
+                widget.dnd_bind("<<Drop>>", self._handle_text_drop)  # type: ignore[attr-defined]
+            except tk.TclError:
+                pass
+            for child in widget.winfo_children():
+                register_tree(child)
+
+        register_tree(self)
+        register_tree(root)
+
+    def _handle_text_drop(self, event: object) -> None:
+        raw_text = str(getattr(event, "data", "") or "").strip()
+        urls = self._extract_youtube_urls(raw_text)
+        if not urls:
+            self._append_log("Drag-and-drop: YouTube-ссылка не найдена.\n")
+            return
+
+        first_url = urls[0]
+        if not self.url_var.get().strip():
+            self.url_var.set(first_url)
+
+        added = 0
+        for url in urls:
+            if url not in self.queue_urls:
+                self.queue_urls.append(url)
+                self._queue_insert_or_update(url, status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
+                added += 1
+        self._append_log(f"{self.t('drop_added')}: {added}\n")
+
+    @staticmethod
+    def _extract_youtube_urls(text: str) -> list[str]:
+        cleaned = text.replace("{", " ").replace("}", " ").replace("\n", " ")
+        candidates = re.findall(r"https?://[^\s\"']+", cleaned)
+        urls: list[str] = []
+        for candidate in candidates:
+            url = candidate.rstrip(".,);]")
+            if is_supported_youtube_url(url) and url not in urls:
+                urls.append(url)
+        return urls
 
     def _on_mode_changed(self, _event: object | None = None) -> None:
         mode = self.mode_var.get()
@@ -429,13 +638,13 @@ class StreamDownloaderApp(tk.Tk):
     def _add_url_to_queue(self) -> None:
         url = self.url_var.get().strip()
         if not url:
-            messagebox.showwarning("Очередь", "Сначала вставь YouTube-ссылку.")
+            messagebox.showwarning(self.t("queue"), "Сначала вставь YouTube-ссылку.")
             return
         if not is_supported_youtube_url(url):
-            messagebox.showwarning("Очередь", "Это не похоже на YouTube-ссылку.")
+            messagebox.showwarning(self.t("queue"), "Это не похоже на YouTube-ссылку.")
             return
         if url in self.queue_urls:
-            messagebox.showinfo("Очередь", "Эта ссылка уже есть в очереди.")
+            messagebox.showinfo(self.t("queue"), "Эта ссылка уже есть в очереди.")
             return
         self.queue_urls.append(url)
         self._queue_insert_or_update(url, status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
@@ -573,7 +782,7 @@ class StreamDownloaderApp(tk.Tk):
         self.last_output_file = None
         self.open_folder_button.configure(state="disabled")
         self._set_status("Analyzing")
-        self._queue_insert_or_update(url, status="Анализ", quality=self.quality_var.get(), progress="0%")
+        self._queue_insert_or_update(url, status=self.t("analyze"), quality=self.quality_var.get(), progress="0%")
         self._append_log(f"\n--- Новая загрузка ---\nURL: {url}\n")
         analysis = self._analyze_video_sync(url)
         estimated_size = None
@@ -894,7 +1103,7 @@ class StreamDownloaderApp(tk.Tk):
                 elif event == "status":
                     self._set_status(str(payload))
                     if self.active_url:
-                        self._queue_insert_or_update(self.active_url, status=STATUS_LABELS.get(str(payload), str(payload)))
+                        self._queue_insert_or_update(self.active_url, status=self._status_label(str(payload)))
                 elif event == "finish":
                     self._handle_finish(payload)  # type: ignore[arg-type]
                 elif event == "quality_result":
@@ -951,7 +1160,7 @@ class StreamDownloaderApp(tk.Tk):
             self.percent_var.set("100%")
             self._set_status("Finished")
             if self.active_url:
-                self._queue_insert_or_update(self.active_url, status="Готово", progress="100%")
+                self._queue_insert_or_update(self.active_url, status=self.t("done"), progress="100%")
             self._append_log(f"\n{result.message}\n")
             if result.output_file:
                 self._append_log(f"Saved file: {result.output_file}\n")
@@ -973,7 +1182,7 @@ class StreamDownloaderApp(tk.Tk):
         if self.active_url:
             self._queue_insert_or_update(self.active_url, status="Ошибка")
         self.pending_urls.clear()
-        if self.status_var.get() != STATUS_LABELS["Idle"]:
+        if self.status_key != "Idle":
             self._set_status("Error")
         self._append_log(f"\n{result.message}\n")
         self._append_log(f"Log file: {self.log_file}\n")
@@ -1030,7 +1239,7 @@ class StreamDownloaderApp(tk.Tk):
         if not success or not repaired:
             self._set_status("Error")
             self._append_log("\nОшибка ремонта:\n" + error + "\n")
-            messagebox.showerror("Починить видео", error)
+            messagebox.showerror(self.t("repair_file"), error)
             return
         self._set_status("Finished")
         self.last_output_file = repaired
@@ -1039,7 +1248,7 @@ class StreamDownloaderApp(tk.Tk):
         self._append_log(f"\nГотовый universal MP4:\n{repaired}\n")
         if report:
             self._append_log("\nПроверка файла после ремонта:\n" + report_to_text(report) + "\n")
-        messagebox.showinfo("Починить видео", f"Готово:\n{repaired}")
+        messagebox.showinfo(self.t("repair_file"), f"Готово:\n{repaired}")
 
     def _start_app_update_check(self) -> None:
         self.check_update_button.configure(state="disabled")
@@ -1117,22 +1326,22 @@ class StreamDownloaderApp(tk.Tk):
     def _repeat_history_url(self) -> None:
         selection = self.history_listbox.curselection()
         if not selection:
-            messagebox.showwarning("История", "Выбери файл в истории.")
+            messagebox.showwarning(self.t("history"), "Выбери файл в истории.")
             return
         url = self.history_items[selection[0]].get("url", "")
         if not url:
-            messagebox.showwarning("История", "У этого файла нет сохранённой ссылки.")
+            messagebox.showwarning(self.t("history"), "У этого файла нет сохранённой ссылки.")
             return
         self.url_var.set(url)
 
     def _current_history_path(self) -> Path | None:
         selection = self.history_listbox.curselection()
         if not selection:
-            messagebox.showwarning("История", "Выбери файл в истории.")
+            messagebox.showwarning(self.t("history"), "Выбери файл в истории.")
             return None
         path = Path(self.history_items[selection[0]].get("path", ""))
         if not path.exists():
-            messagebox.showwarning("История", f"Файл больше не найден:\n{path}")
+            messagebox.showwarning(self.t("history"), f"Файл больше не найден:\n{path}")
             return None
         return path
 
@@ -1168,6 +1377,7 @@ class StreamDownloaderApp(tk.Tk):
                 quality=self.quality_var.get(),
                 output_format=self.format_var.get(),
                 download_mode=self.mode_var.get(),
+                language=self.language_var.get(),
                 use_temp_first=self.temp_first_var.get(),
             )
         )
@@ -1197,7 +1407,8 @@ class StreamDownloaderApp(tk.Tk):
         self.log_text.configure(state="disabled")
 
     def _set_status(self, status: str) -> None:
-        self.status_var.set(STATUS_LABELS.get(status, status))
+        self.status_key = status
+        self.status_var.set(self._status_label(status))
 
     def _write_log_file(self, text: str) -> None:
         try:

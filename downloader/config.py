@@ -16,6 +16,7 @@ class AppConfig:
     quality: str = "1440p / 2K"
     output_format: str = "MP4"
     download_mode: str = "ВСЁ: максимально совместимый MP4"
+    language: str = "RU"
     use_temp_first: bool = True
 
 
