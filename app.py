@@ -29,7 +29,7 @@ from downloader.utils import (
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 GITHUB_RELEASES = {
     "Darwin": "https://api.github.com/repos/Erni2008/erni-stream-downloader-macos/releases/latest",
     "Windows": "https://api.github.com/repos/Erni2008/erni-stream-downloader-windows/releases/latest",
@@ -63,6 +63,7 @@ class StreamDownloaderApp(tk.Tk):
         self.log_file = get_log_path()
         self.pending_urls: list[str] = []
         self.queue_urls: list[str] = []
+        self.queue_row_ids: dict[str, str] = {}
         self.active_url: str | None = None
         self.last_analysis_url: str | None = None
         self.last_analysis_size: int | None = None
@@ -305,18 +306,23 @@ class StreamDownloaderApp(tk.Tk):
         tk.Label(side, textvariable=self.tools_var, bg="#e8f1ff", fg="#185abc", padx=12, pady=8, font=("TkDefaultFont", 10, "bold")).grid(row=0, column=0, sticky="ew")
         tk.Label(side, text="Очередь", bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=1, column=0, sticky="w", pady=(18, 6))
         tk.Label(side, text="Добавляй несколько ссылок и скачивай подряд.", bg=panel, fg=muted, wraplength=260, justify="left", font=("TkDefaultFont", 10)).grid(row=2, column=0, sticky="w")
-        self.queue_listbox = tk.Listbox(
+        self.queue_table = ttk.Treeview(
             side,
+            columns=("status", "quality", "size", "progress"),
+            show="tree headings",
             height=7,
-            bg="#f8fafc",
-            fg=ink,
-            selectbackground=accent,
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground="#d9e2ef",
-            font=("TkDefaultFont", 10),
         )
-        self.queue_listbox.grid(row=3, column=0, sticky="ew", pady=(12, 10))
+        self.queue_table.heading("#0", text="Ссылка")
+        self.queue_table.heading("status", text="Статус")
+        self.queue_table.heading("quality", text="Качество")
+        self.queue_table.heading("size", text="Размер")
+        self.queue_table.heading("progress", text="Готово")
+        self.queue_table.column("#0", width=190, minwidth=140, stretch=True)
+        self.queue_table.column("status", width=82, minwidth=70, stretch=False)
+        self.queue_table.column("quality", width=90, minwidth=80, stretch=False)
+        self.queue_table.column("size", width=78, minwidth=68, stretch=False)
+        self.queue_table.column("progress", width=62, minwidth=56, stretch=False)
+        self.queue_table.grid(row=3, column=0, sticky="ew", pady=(12, 10))
         queue_buttons = tk.Frame(side, bg=panel)
         queue_buttons.grid(row=4, column=0, sticky="ew")
         queue_buttons.columnconfigure((0, 1, 2), weight=1)
@@ -432,25 +438,65 @@ class StreamDownloaderApp(tk.Tk):
             messagebox.showinfo("Очередь", "Эта ссылка уже есть в очереди.")
             return
         self.queue_urls.append(url)
-        self.queue_listbox.insert("end", url)
+        self._queue_insert_or_update(url, status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
         self.url_var.set("")
 
     def _remove_selected_queue_item(self) -> None:
-        selected = list(self.queue_listbox.curselection())
-        for index in reversed(selected):
-            self.queue_listbox.delete(index)
-            del self.queue_urls[index]
+        selected = list(self.queue_table.selection())
+        for row_id in selected:
+            values = self.queue_table.item(row_id, "values")
+            url = self._url_from_queue_row(row_id)
+            self.queue_table.delete(row_id)
+            if url in self.queue_urls:
+                self.queue_urls.remove(url)
+            self.queue_row_ids.pop(url, None)
 
     def _clear_queue_items(self) -> None:
         self.queue_urls.clear()
-        self.queue_listbox.delete(0, "end")
+        self.queue_row_ids.clear()
+        for row_id in self.queue_table.get_children():
+            self.queue_table.delete(row_id)
+
+    def _queue_insert_or_update(self, url: str, status: str | None = None, quality: str | None = None, size: str | None = None, progress: str | None = None) -> None:
+        row_id = self.queue_row_ids.get(url)
+        if not row_id:
+            label = self._short_url_label(url)
+            row_id = self.queue_table.insert("", "end", text=label, values=(status or "Ожидает", quality or self.quality_var.get(), size or "—", progress or "0%"))
+            self.queue_row_ids[url] = row_id
+            return
+        current = list(self.queue_table.item(row_id, "values"))
+        while len(current) < 4:
+            current.append("")
+        if status is not None:
+            current[0] = status
+        if quality is not None:
+            current[1] = quality
+        if size is not None:
+            current[2] = size
+        if progress is not None:
+            current[3] = progress
+        self.queue_table.item(row_id, values=tuple(current))
+
+    def _url_from_queue_row(self, row_id: str) -> str:
+        for url, existing_id in self.queue_row_ids.items():
+            if existing_id == row_id:
+                return url
+        return ""
+
+    @staticmethod
+    def _short_url_label(url: str) -> str:
+        clean = url.replace("https://", "").replace("http://", "")
+        return clean[:42] + ("..." if len(clean) > 42 else "")
 
     def _start_download(self) -> None:
         urls = self._collect_download_urls()
         if not urls:
             return
         self.pending_urls = urls
-        self._clear_queue_items()
+        for url in urls:
+            if url not in self.queue_urls:
+                self.queue_urls.append(url)
+            self._queue_insert_or_update(url, status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
         self._clear_log()
         self._write_log_file(
             f"\n=== {APP_TITLE} {APP_VERSION} session {datetime.now().isoformat(timespec='seconds')} ===\n"
@@ -527,6 +573,7 @@ class StreamDownloaderApp(tk.Tk):
         self.last_output_file = None
         self.open_folder_button.configure(state="disabled")
         self._set_status("Analyzing")
+        self._queue_insert_or_update(url, status="Анализ", quality=self.quality_var.get(), progress="0%")
         self._append_log(f"\n--- Новая загрузка ---\nURL: {url}\n")
         analysis = self._analyze_video_sync(url)
         estimated_size = None
@@ -534,6 +581,10 @@ class StreamDownloaderApp(tk.Tk):
             estimated_size = analysis.get("estimated_size")
             self.last_analysis_url = url
             self.last_analysis_size = estimated_size
+            self._queue_insert_or_update(
+                url,
+                size=self._format_bytes(estimated_size) if isinstance(estimated_size, int) else "—",
+            )
             self._append_log(self._analysis_message(analysis) + "\n")
         else:
             self._append_log("Автоанализ не удался. Продолжаю без точной оценки размера.\n")
@@ -654,7 +705,6 @@ class StreamDownloaderApp(tk.Tk):
         formats = info.get("formats") or []
         heights: list[int] = []
         fps_values: list[float] = []
-        known_sizes: list[int] = []
         for item in formats:
             if not isinstance(item, dict):
                 continue
@@ -664,15 +714,8 @@ class StreamDownloaderApp(tk.Tk):
             fps = item.get("fps")
             if isinstance(fps, (int, float)) and fps > 0:
                 fps_values.append(float(fps))
-            size = item.get("filesize") or item.get("filesize_approx")
-            if isinstance(size, int) and size > 0:
-                known_sizes.append(size)
 
-        top_size = info.get("filesize") or info.get("filesize_approx")
-        if isinstance(top_size, int) and top_size > 0:
-            known_sizes.append(top_size)
-
-        estimated_size = max(known_sizes) if known_sizes else None
+        estimated_size = self._estimate_size_for_selected_quality(formats)
         return {
             "title": info.get("title") or "Unknown title",
             "duration": info.get("duration"),
@@ -681,6 +724,47 @@ class StreamDownloaderApp(tk.Tk):
             "estimated_size": estimated_size,
             "format_count": len(formats),
         }
+
+    def _estimate_size_for_selected_quality(self, formats: list[object]) -> int | None:
+        height_limit = self._height_limit_for_quality(self.quality_var.get())
+        video_sizes: list[int] = []
+        audio_sizes: list[int] = []
+        fallback_sizes: list[int] = []
+        for item in formats:
+            if not isinstance(item, dict):
+                continue
+            size = item.get("filesize") or item.get("filesize_approx")
+            if not isinstance(size, int) or size <= 0:
+                continue
+            height = item.get("height")
+            vcodec = str(item.get("vcodec") or "none")
+            acodec = str(item.get("acodec") or "none")
+            if height_limit and isinstance(height, int) and height > height_limit:
+                continue
+            if vcodec != "none" and acodec == "none":
+                video_sizes.append(size)
+            elif acodec != "none" and vcodec == "none":
+                audio_sizes.append(size)
+            else:
+                fallback_sizes.append(size)
+
+        if video_sizes:
+            return max(video_sizes) + (max(audio_sizes) if audio_sizes else 0)
+        if fallback_sizes:
+            return max(fallback_sizes)
+        if audio_sizes:
+            return max(audio_sizes)
+        return None
+
+    @staticmethod
+    def _height_limit_for_quality(quality: str) -> int | None:
+        if "1440" in quality:
+            return 1440
+        if "1080" in quality:
+            return 1080
+        if "720" in quality:
+            return 720
+        return None
 
     def _analysis_message(self, analysis: dict[str, object]) -> str:
         title = analysis.get("title") or "Unknown title"
@@ -694,7 +778,7 @@ class StreamDownloaderApp(tk.Tk):
             f"Название: {title}",
             f"Максимальное качество: {max_height}p" if max_height else "Максимальное качество: не удалось определить",
             f"FPS: {max_fps:g}" if isinstance(max_fps, float) else "FPS: не удалось определить",
-            f"Примерный размер: {self._format_bytes(estimated_size)}" if isinstance(estimated_size, int) else "Примерный размер: не удалось определить",
+            f"Примерный размер выбранного качества: {self._format_bytes(estimated_size)}" if isinstance(estimated_size, int) else "Примерный размер выбранного качества: не удалось определить",
             f"Длительность: {self._format_duration(duration)}" if isinstance(duration, (int, float)) else "Длительность: не удалось определить",
             f"Рекомендация: Quality = {recommendation}",
         ]
@@ -805,8 +889,12 @@ class StreamDownloaderApp(tk.Tk):
                     value = float(payload)
                     self.progress["value"] = value
                     self.percent_var.set(f"{value:.1f}%")
+                    if self.active_url:
+                        self._queue_insert_or_update(self.active_url, progress=f"{value:.1f}%")
                 elif event == "status":
                     self._set_status(str(payload))
+                    if self.active_url:
+                        self._queue_insert_or_update(self.active_url, status=STATUS_LABELS.get(str(payload), str(payload)))
                 elif event == "finish":
                     self._handle_finish(payload)  # type: ignore[arg-type]
                 elif event == "quality_result":
@@ -862,6 +950,8 @@ class StreamDownloaderApp(tk.Tk):
             self.progress["value"] = 100
             self.percent_var.set("100%")
             self._set_status("Finished")
+            if self.active_url:
+                self._queue_insert_or_update(self.active_url, status="Готово", progress="100%")
             self._append_log(f"\n{result.message}\n")
             if result.output_file:
                 self._append_log(f"Saved file: {result.output_file}\n")
@@ -880,6 +970,8 @@ class StreamDownloaderApp(tk.Tk):
             return
 
         self.download_button.configure(state="normal")
+        if self.active_url:
+            self._queue_insert_or_update(self.active_url, status="Ошибка")
         self.pending_urls.clear()
         if self.status_var.get() != STATUS_LABELS["Idle"]:
             self._set_status("Error")
