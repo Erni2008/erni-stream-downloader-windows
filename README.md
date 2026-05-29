@@ -1,6 +1,6 @@
 # ERNI Stream Downloader for Windows
 
-Windows-версия ERNI Stream Downloader `1.2.4`.
+Windows-версия ERNI Stream Downloader `1.3.0`.
 
 Приложение скачивает ваши YouTube-стримы/видео через `yt-dlp` и `ffmpeg`, а затем делает совместимый `MP4` для обычных плееров и VEGAS Pro.
 
@@ -20,8 +20,13 @@ Windows-версия ERNI Stream Downloader `1.2.4`.
   - `Монтаж: Final Cut / macOS` — MP4 для macOS/Final Cut;
   - `Архив: максимум качества без перекодирования` — максимально близко к YouTube-оригиналу.
 - Автоматически анализирует видео перед скачиванием: максимум качества, FPS, длительность и примерный размер.
+- Проверяет готовый файл после скачивания через `ffprobe`: есть ли картинка, звук, codec, FPS и resolution.
+- Имеет историю загрузок: открыть файл, открыть папку, повторить ссылку.
+- Может проверить любой готовый видеофайл кнопкой `Проверить файл`.
+- Может починить готовое видео кнопкой `Починить видео`: создаёт universal MP4 для плееров и монтажных программ.
 - Проверяет свободное место до начала скачивания.
 - Может обновлять `yt-dlp` из интерфейса.
+- Может проверить обновление самого приложения через GitHub Releases.
 - Для `MP4` делает совместимый файл:
   - H.264 video;
   - AAC audio;
@@ -113,6 +118,17 @@ winget install JRSoftware.InnoSetup
 
 ```text
 installer-output\ERNI Stream Downloader Setup.exe
+```
+
+## Code signing
+
+Для публикации в production нужен Windows code signing certificate. После покупки сертификата подпишите `.exe` и installer через `signtool`.
+
+Пример:
+
+```powershell
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a "dist\ERNI Stream Downloader.exe"
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a "installer-output\ERNI Stream Downloader Setup.exe"
 ```
 
 ## Где лог

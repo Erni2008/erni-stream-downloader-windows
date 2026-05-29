@@ -13,8 +13,9 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from downloader.config import AppConfig, get_log_path, load_config, save_config
+from downloader.config import AppConfig, get_log_path, load_config, load_history, save_config, save_history
 from downloader.core import DOWNLOAD_MODE_DESCRIPTIONS, DOWNLOAD_MODES, DownloadRequest, DownloadResult, DownloadWorker, QUALITY_FORMATS
+from downloader.media import MediaReport, probe_media, repair_to_universal_mp4, report_to_text
 from downloader.utils import (
     check_dependencies,
     dependency_instructions,
@@ -28,7 +29,11 @@ from downloader.utils import (
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.2.4"
+APP_VERSION = "1.3.0"
+GITHUB_RELEASES = {
+    "Darwin": "https://api.github.com/repos/Erni2008/erni-stream-downloader-macos/releases/latest",
+    "Windows": "https://api.github.com/repos/Erni2008/erni-stream-downloader-windows/releases/latest",
+}
 FORMATS = ["MP4", "MKV"]
 STATUS_LABELS = {
     "Idle": "Готово",
@@ -61,6 +66,8 @@ class StreamDownloaderApp(tk.Tk):
         self.active_url: str | None = None
         self.last_analysis_url: str | None = None
         self.last_analysis_size: int | None = None
+        self.history_items = load_history()
+        self.selected_history_path: Path | None = None
 
         self.url_var = tk.StringVar()
         self.save_dir_var = tk.StringVar(value=self.config_data.save_directory)
@@ -272,7 +279,7 @@ class StreamDownloaderApp(tk.Tk):
 
         action_row = tk.Frame(form, bg=panel)
         action_row.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(18, 0))
-        action_row.columnconfigure(5, weight=1)
+        action_row.columnconfigure(8, weight=1)
         self.download_button = make_button(action_row, "Скачать", self._start_download, "primary")
         self.download_button.grid(row=0, column=0, padx=(0, 8))
         self.check_quality_button = make_button(action_row, "Анализ видео", self._start_quality_check)
@@ -283,8 +290,14 @@ class StreamDownloaderApp(tk.Tk):
         self.open_folder_button.grid(row=0, column=3, padx=(0, 8))
         self.update_ytdlp_button = make_button(action_row, "Обновить yt-dlp", self._start_update_ytdlp)
         self.update_ytdlp_button.grid(row=0, column=4, padx=(0, 8))
+        self.check_update_button = make_button(action_row, "Обновить app", self._start_app_update_check)
+        self.check_update_button.grid(row=0, column=5, padx=(0, 8))
+        self.probe_file_button = make_button(action_row, "Проверить файл", self._select_and_probe_file)
+        self.probe_file_button.grid(row=0, column=6, padx=(0, 8))
+        self.repair_file_button = make_button(action_row, "Починить видео", self._select_and_repair_file)
+        self.repair_file_button.grid(row=0, column=7, padx=(0, 8))
         self.open_log_button = make_button(action_row, "Лог", self._open_log_folder, "ghost")
-        self.open_log_button.grid(row=0, column=5, sticky="e")
+        self.open_log_button.grid(row=0, column=8, sticky="e")
 
         side = tk.Frame(main, bg=panel, padx=18, pady=18, highlightthickness=1, highlightbackground="#e1e8f2")
         side.grid(row=0, column=1, sticky="nsew")
@@ -324,6 +337,27 @@ class StreamDownloaderApp(tk.Tk):
             font=("TkDefaultFont", 9),
         ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
+        tk.Label(side, text="История", bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=6, column=0, sticky="w", pady=(18, 6))
+        self.history_listbox = tk.Listbox(
+            side,
+            height=5,
+            bg="#f8fafc",
+            fg=ink,
+            selectbackground=accent,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#d9e2ef",
+            font=("TkDefaultFont", 10),
+        )
+        self.history_listbox.grid(row=7, column=0, sticky="ew", pady=(0, 10))
+        self.history_listbox.bind("<<ListboxSelect>>", self._on_history_select)
+        history_buttons = tk.Frame(side, bg=panel)
+        history_buttons.grid(row=8, column=0, sticky="ew")
+        history_buttons.columnconfigure((0, 1, 2), weight=1)
+        make_button(history_buttons, "Открыть", self._open_history_file, "secondary").grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        make_button(history_buttons, "Папка", self._open_history_folder, "secondary").grid(row=0, column=1, sticky="ew", padx=(0, 6))
+        make_button(history_buttons, "Повторить", self._repeat_history_url, "secondary").grid(row=0, column=2, sticky="ew")
+
         status_frame = tk.Frame(shell, bg=panel, padx=18, pady=16, highlightthickness=1, highlightbackground="#e1e8f2")
         status_frame.grid(row=2, column=0, sticky="ew", pady=(0, 14))
         status_frame.columnconfigure(0, weight=1)
@@ -358,6 +392,7 @@ class StreamDownloaderApp(tk.Tk):
         scrollbar = ttk.Scrollbar(log_panel, orient="vertical", command=self.log_text.yview)
         scrollbar.grid(row=1, column=1, sticky="ns")
         self.log_text.configure(yscrollcommand=scrollbar.set)
+        self._refresh_history()
         self._refresh_tool_status()
 
     def _check_dependencies_on_start(self) -> None:
@@ -778,6 +813,12 @@ class StreamDownloaderApp(tk.Tk):
                     self._handle_quality_result(payload)  # type: ignore[arg-type]
                 elif event == "update_ytdlp_result":
                     self._handle_update_ytdlp_result(payload)  # type: ignore[arg-type]
+                elif event == "probe_result":
+                    self._handle_probe_result(payload)  # type: ignore[arg-type]
+                elif event == "repair_result":
+                    self._handle_repair_result(payload)  # type: ignore[arg-type]
+                elif event == "app_update_result":
+                    self._handle_app_update_result(payload)  # type: ignore[arg-type]
         except queue.Empty:
             pass
         self.after(100, self._process_events)
@@ -824,6 +865,11 @@ class StreamDownloaderApp(tk.Tk):
             self._append_log(f"\n{result.message}\n")
             if result.output_file:
                 self._append_log(f"Saved file: {result.output_file}\n")
+                self._add_history_item(result.output_file, self.active_url or "")
+                report = probe_media(result.output_file)
+                self._append_log("\nПроверка готового файла:\n" + report_to_text(report) + "\n")
+                if not report.has_video or not report.has_audio:
+                    messagebox.showwarning("Проблема в файле", report.message)
             self._append_log(f"Log file: {self.log_file}\n")
             if self.pending_urls:
                 self._append_log(f"\nОсталось в очереди: {len(self.pending_urls)}\n")
@@ -840,6 +886,172 @@ class StreamDownloaderApp(tk.Tk):
         self._append_log(f"\n{result.message}\n")
         self._append_log(f"Log file: {self.log_file}\n")
         messagebox.showerror("Download error", result.message)
+
+    def _select_and_probe_file(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Выбери видео для проверки",
+            filetypes=[("Video files", "*.mp4 *.mkv *.mov *.webm *.avi"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        self._clear_log()
+        self._append_log(f"Проверяю файл:\n{path}\n\n")
+        thread = threading.Thread(target=self._probe_file_worker, args=(Path(path),), daemon=True)
+        thread.start()
+
+    def _probe_file_worker(self, path: Path) -> None:
+        self.event_queue.put(("probe_result", probe_media(path)))
+
+    def _handle_probe_result(self, report: MediaReport) -> None:
+        text = report_to_text(report)
+        self._append_log(text + "\n")
+        if report.compatible:
+            messagebox.showinfo("Проверка файла", text)
+        else:
+            messagebox.showwarning("Проверка файла", text)
+
+    def _select_and_repair_file(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Выбери видео, которое нужно починить",
+            filetypes=[("Video files", "*.mp4 *.mkv *.mov *.webm *.avi"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        self._clear_log()
+        self._set_status("Converting")
+        self._append_log(f"Чиню видео в универсальный MP4:\n{path}\n\n")
+        self.repair_file_button.configure(state="disabled")
+        thread = threading.Thread(target=self._repair_file_worker, args=(Path(path),), daemon=True)
+        thread.start()
+
+    def _repair_file_worker(self, path: Path) -> None:
+        try:
+            repaired = repair_to_universal_mp4(path, on_log=lambda line: self.event_queue.put(("log", line)))
+            report = probe_media(repaired)
+            self.event_queue.put(("repair_result", (True, repaired, report, "")))
+        except Exception as exc:
+            self.event_queue.put(("repair_result", (False, None, None, str(exc))))
+
+    def _handle_repair_result(self, payload: tuple[bool, Path | None, MediaReport | None, str]) -> None:
+        success, repaired, report, error = payload
+        self.repair_file_button.configure(state="normal")
+        if not success or not repaired:
+            self._set_status("Error")
+            self._append_log("\nОшибка ремонта:\n" + error + "\n")
+            messagebox.showerror("Починить видео", error)
+            return
+        self._set_status("Finished")
+        self.last_output_file = repaired
+        self.open_folder_button.configure(state="normal")
+        self._add_history_item(repaired, "")
+        self._append_log(f"\nГотовый universal MP4:\n{repaired}\n")
+        if report:
+            self._append_log("\nПроверка файла после ремонта:\n" + report_to_text(report) + "\n")
+        messagebox.showinfo("Починить видео", f"Готово:\n{repaired}")
+
+    def _start_app_update_check(self) -> None:
+        self.check_update_button.configure(state="disabled")
+        self._append_log("\nПроверяю обновление приложения через GitHub Releases...\n")
+        thread = threading.Thread(target=self._check_app_update_worker, daemon=True)
+        thread.start()
+
+    def _check_app_update_worker(self) -> None:
+        url = GITHUB_RELEASES.get(platform.system())
+        if not url:
+            self.event_queue.put(("app_update_result", (False, "Для этой системы автообновление пока не настроено.")))
+            return
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": APP_TITLE})
+            with urllib.request.urlopen(request, timeout=15) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            self.event_queue.put(("app_update_result", (False, f"Не удалось проверить обновления:\n{exc}")))
+            return
+        latest = str(data.get("tag_name") or data.get("name") or "").lstrip("v")
+        page = data.get("html_url") or ""
+        if latest and latest != APP_VERSION:
+            self.event_queue.put(("app_update_result", (True, f"Доступна версия {latest}.\nОткрой GitHub Releases:\n{page}")))
+        else:
+            self.event_queue.put(("app_update_result", (True, f"Установлена актуальная версия {APP_VERSION}.")))
+
+    def _handle_app_update_result(self, payload: tuple[bool, str]) -> None:
+        success, message = payload
+        self.check_update_button.configure(state="normal")
+        self._append_log(message + "\n")
+        if success:
+            messagebox.showinfo("Обновление приложения", message)
+        else:
+            messagebox.showwarning("Обновление приложения", message)
+
+    def _add_history_item(self, path: Path, url: str) -> None:
+        item = {
+            "path": str(path),
+            "url": url,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        self.history_items = [entry for entry in self.history_items if entry.get("path") != str(path)]
+        self.history_items.insert(0, item)
+        self.history_items = self.history_items[:30]
+        save_history(self.history_items)
+        self._refresh_history()
+
+    def _refresh_history(self) -> None:
+        if not hasattr(self, "history_listbox"):
+            return
+        self.history_listbox.delete(0, "end")
+        for item in self.history_items[:12]:
+            path = Path(item.get("path", ""))
+            label = path.name if path.name else item.get("path", "")
+            self.history_listbox.insert("end", label)
+
+    def _on_history_select(self, _event: object | None = None) -> None:
+        selection = self.history_listbox.curselection()
+        if not selection:
+            self.selected_history_path = None
+            return
+        item = self.history_items[selection[0]]
+        self.selected_history_path = Path(item.get("path", ""))
+
+    def _open_history_file(self) -> None:
+        path = self._current_history_path()
+        if path:
+            self._open_file(path)
+
+    def _open_history_folder(self) -> None:
+        path = self._current_history_path()
+        if path:
+            open_folder(path.parent)
+
+    def _repeat_history_url(self) -> None:
+        selection = self.history_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("История", "Выбери файл в истории.")
+            return
+        url = self.history_items[selection[0]].get("url", "")
+        if not url:
+            messagebox.showwarning("История", "У этого файла нет сохранённой ссылки.")
+            return
+        self.url_var.set(url)
+
+    def _current_history_path(self) -> Path | None:
+        selection = self.history_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("История", "Выбери файл в истории.")
+            return None
+        path = Path(self.history_items[selection[0]].get("path", ""))
+        if not path.exists():
+            messagebox.showwarning("История", f"Файл больше не найден:\n{path}")
+            return None
+        return path
+
+    def _open_file(self, path: Path) -> None:
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.Popen(["open", str(path)])
+        elif system == "Windows":
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
 
     def _open_output_folder(self) -> None:
         if self.last_output_file:

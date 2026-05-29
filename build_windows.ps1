@@ -31,7 +31,8 @@ if (!(Test-Path $ytDlpExe)) {
 }
 
 $ffmpegExe = Join-Path $vendorDir "ffmpeg.exe"
-if (!(Test-Path $ffmpegExe)) {
+$ffprobeExe = Join-Path $vendorDir "ffprobe.exe"
+if (!(Test-Path $ffmpegExe) -or !(Test-Path $ffprobeExe)) {
   Write-Host "Downloading ffmpeg..."
   $ffmpegZip = Join-Path $vendorDir "ffmpeg-release-essentials.zip"
   $ffmpegExtract = Join-Path $vendorDir "ffmpeg"
@@ -46,7 +47,12 @@ if (!(Test-Path $ffmpegExe)) {
   if (!$foundFfmpeg) {
     throw "Could not find ffmpeg.exe in downloaded archive."
   }
+  $foundFfprobe = Get-ChildItem -Path $ffmpegExtract -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
+  if (!$foundFfprobe) {
+    throw "Could not find ffprobe.exe in downloaded archive."
+  }
   Copy-Item $foundFfmpeg.FullName $ffmpegExe
+  Copy-Item $foundFfprobe.FullName $ffprobeExe
 }
 
 & $pythonExe @pythonArgs -m PyInstaller `
@@ -58,6 +64,7 @@ if (!(Test-Path $ffmpegExe)) {
   --icon "assets\erni-icon.ico" `
   --add-binary "$ytDlpExe;." `
   --add-binary "$ffmpegExe;." `
+  --add-binary "$ffprobeExe;." `
   app.py
 
 Write-Host "Built: dist\\ERNI Stream Downloader.exe"

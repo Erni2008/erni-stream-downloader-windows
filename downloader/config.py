@@ -42,6 +42,10 @@ def get_log_path() -> Path:
     return get_config_dir() / "app.log"
 
 
+def get_history_path() -> Path:
+    return get_config_dir() / "history.json"
+
+
 def load_config() -> AppConfig:
     path = get_config_path()
     if not path.exists():
@@ -61,3 +65,22 @@ def save_config(config: AppConfig) -> None:
     path = get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
+
+
+def load_history() -> list[dict[str, str]]:
+    path = get_history_path()
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def save_history(items: list[dict[str, str]]) -> None:
+    path = get_history_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(items[:30], indent=2, ensure_ascii=False), encoding="utf-8")
