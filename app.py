@@ -36,7 +36,7 @@ from downloader.utils import (
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.0"
 GITHUB_RELEASES = {
     "Darwin": "https://api.github.com/repos/Erni2008/erni-stream-downloader-macos/releases/latest",
     "Windows": "https://api.github.com/repos/Erni2008/erni-stream-downloader-windows/releases/latest",
@@ -78,6 +78,10 @@ I18N = {
         "repair_file": "Починить видео",
         "open_save": "Открыть папку",
         "clear_log": "Очистить лог",
+        "copy_log": "Копировать лог",
+        "copy_path": "Копировать путь",
+        "open_file": "Открыть файл",
+        "retry_failed": "Повторить ошибки",
         "smart_preset": "Smart preset",
         "quick_modes": "Быстрые режимы",
         "tools": "Инструменты",
@@ -146,6 +150,10 @@ I18N = {
         "repair_file": "Repair video",
         "open_save": "Open folder",
         "clear_log": "Clear log",
+        "copy_log": "Copy log",
+        "copy_path": "Copy path",
+        "open_file": "Open file",
+        "retry_failed": "Retry failed",
         "smart_preset": "Smart preset",
         "quick_modes": "Quick modes",
         "tools": "Tools",
@@ -212,6 +220,7 @@ class StreamDownloaderApp(BaseTk):
         self.pending_urls: list[str] = []
         self.queue_paused = False
         self.queue_urls: list[str] = []
+        self.failed_urls: list[str] = []
         self.queue_row_ids: dict[str, str] = {}
         self.active_url: str | None = None
         self.last_analysis_url: str | None = None
@@ -577,6 +586,8 @@ class StreamDownloaderApp(BaseTk):
         make_button(queue_buttons, self.t("clear"), self._clear_queue_items, "secondary").grid(row=0, column=2, sticky="ew", padx=(0, 6))
         self.pause_queue_button = make_button(queue_buttons, self.t("pause_queue"), self._toggle_queue_pause, "secondary")
         self.pause_queue_button.grid(row=0, column=3, sticky="ew")
+        self.retry_failed_button = make_button(queue_buttons, self.t("retry_failed"), self._retry_failed_urls, "ghost")
+        self.retry_failed_button.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))
 
         tips = tk.Frame(side, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
         tips.grid(row=5, column=0, sticky="ew", pady=(18, 0))
@@ -611,6 +622,13 @@ class StreamDownloaderApp(BaseTk):
         result_card.grid(row=7, column=0, sticky="ew", pady=(14, 0))
         tk.Label(result_card, text=self.t("result"), bg=soft, fg=ink, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
         tk.Label(result_card, textvariable=self.result_var, bg=soft, fg=muted, wraplength=270, justify="left", font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        result_actions = tk.Frame(result_card, bg=soft)
+        result_actions.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        result_actions.columnconfigure((0, 1), weight=1)
+        self.open_file_button = make_button(result_actions, self.t("open_file"), self._open_last_file, "secondary", state="disabled")
+        self.open_file_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.copy_path_button = make_button(result_actions, self.t("copy_path"), self._copy_last_file_path, "secondary", state="disabled")
+        self.copy_path_button.grid(row=0, column=1, sticky="ew")
 
         tools = tk.Frame(side, bg=panel)
         tools.grid(row=8, column=0, sticky="ew", pady=(18, 0))
@@ -627,7 +645,8 @@ class StreamDownloaderApp(BaseTk):
         self.check_update_button.grid(row=3, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
         make_button(tools, self.t("clear_log"), self._clear_log, "ghost").grid(row=3, column=1, sticky="ew", pady=(0, 6))
         self.open_log_button = make_button(tools, self.t("log"), self._open_log_folder, "ghost")
-        self.open_log_button.grid(row=4, column=0, columnspan=2, sticky="ew")
+        self.open_log_button.grid(row=4, column=0, sticky="ew", padx=(0, 6))
+        make_button(tools, self.t("copy_log"), self._copy_log_to_clipboard, "ghost").grid(row=4, column=1, sticky="ew")
 
         tk.Label(side, text=self.t("history"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=9, column=0, sticky="w", pady=(18, 6))
         self.history_listbox = tk.Listbox(
@@ -815,9 +834,25 @@ class StreamDownloaderApp(BaseTk):
 
     def _paste_url(self) -> None:
         try:
-            self.url_var.set(self.clipboard_get().strip())
+            text = self.clipboard_get().strip()
         except tk.TclError:
             messagebox.showwarning("Clipboard", "Clipboard is empty or does not contain text.")
+            return
+
+        urls = self._extract_youtube_urls(text)
+        if not urls:
+            self.url_var.set(text)
+            return
+
+        self.url_var.set(urls[0])
+        added = 0
+        for url in urls:
+            if url not in self.queue_urls:
+                self.queue_urls.append(url)
+                self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
+                added += 1
+        if len(urls) > 1:
+            self._append_log(f"Paste: добавлено ссылок в очередь: {added}\n")
 
     def _browse_directory(self) -> None:
         initial = self.save_dir_var.get() or str(Path.home())
@@ -856,6 +891,19 @@ class StreamDownloaderApp(BaseTk):
         self.queue_row_ids.clear()
         for row_id in self.queue_table.get_children():
             self.queue_table.delete(row_id)
+
+    def _retry_failed_urls(self) -> None:
+        if not self.failed_urls:
+            messagebox.showinfo(self.t("queue"), "Нет ссылок с ошибкой для повтора.")
+            return
+        added = 0
+        for url in list(self.failed_urls):
+            if url not in self.queue_urls:
+                self.queue_urls.append(url)
+                added += 1
+            self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает повтор", quality=self.quality_var.get(), size="—", progress="0%")
+        self.failed_urls.clear()
+        self._append_log(f"\nДобавлено для повтора: {added}\n")
 
     def _queue_insert_or_update(
         self,
@@ -1570,6 +1618,10 @@ class StreamDownloaderApp(BaseTk):
         if result.output_file:
             self.last_output_file = result.output_file
             self.open_folder_button.configure(state="normal")
+            if hasattr(self, "open_file_button"):
+                self.open_file_button.configure(state="normal")
+            if hasattr(self, "copy_path_button"):
+                self.copy_path_button.configure(state="normal")
 
         if result.success:
             self.progress["value"] = 100
@@ -1612,6 +1664,8 @@ class StreamDownloaderApp(BaseTk):
         self.download_button.configure(state="normal")
         if self.active_url:
             self._queue_insert_or_update(self.active_url, status="Ошибка")
+            if self.active_url not in self.failed_urls:
+                self.failed_urls.append(self.active_url)
         self.pending_urls.clear()
         self.queue_paused = False
         self._refresh_pause_button()
@@ -1795,6 +1849,20 @@ class StreamDownloaderApp(BaseTk):
         elif self.save_dir_var.get().strip():
             open_folder(Path(self.save_dir_var.get().strip()))
 
+    def _open_last_file(self) -> None:
+        if not self.last_output_file or not self.last_output_file.exists():
+            messagebox.showwarning(self.t("open_file"), "Файл ещё не выбран или уже удалён.")
+            return
+        self._open_file(self.last_output_file)
+
+    def _copy_last_file_path(self) -> None:
+        if not self.last_output_file:
+            messagebox.showwarning(self.t("copy_path"), "Пока нет готового файла.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(str(self.last_output_file))
+        self._append_log(f"Путь скопирован: {self.last_output_file}\n")
+
     def _open_save_folder(self) -> None:
         path = Path(self.save_dir_var.get().strip()).expanduser() if self.save_dir_var.get().strip() else Path.home()
         path.mkdir(parents=True, exist_ok=True)
@@ -1802,6 +1870,22 @@ class StreamDownloaderApp(BaseTk):
 
     def _open_log_folder(self) -> None:
         open_folder(self.log_file.parent)
+
+    def _copy_log_to_clipboard(self) -> None:
+        self.log_text.configure(state="normal")
+        text = self.log_text.get("1.0", "end").strip()
+        self.log_text.configure(state="disabled")
+        if not text and self.log_file.exists():
+            try:
+                text = self.log_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                text = ""
+        if not text:
+            messagebox.showinfo(self.t("copy_log"), "Лог пока пустой.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        messagebox.showinfo(self.t("copy_log"), "Лог скопирован в буфер обмена.")
 
     def _warn_if_external_drive(self, path: Path) -> None:
         if is_probably_external_drive(path):
