@@ -80,6 +80,7 @@ I18N = {
         "clear_log": "Очистить лог",
         "smart_preset": "Smart preset",
         "quick_modes": "Быстрые режимы",
+        "tools": "Инструменты",
         "platform_waiting": "Platform: waiting for link",
         "platform_detected": "Platform",
         "log": "Лог",
@@ -139,6 +140,7 @@ I18N = {
         "clear_log": "Clear log",
         "smart_preset": "Smart preset",
         "quick_modes": "Quick modes",
+        "tools": "Tools",
         "platform_waiting": "Platform: waiting for link",
         "platform_detected": "Platform",
         "log": "Log",
@@ -361,12 +363,21 @@ class StreamDownloaderApp(BaseTk):
         root = tk.Frame(self, bg=bg)
         root.grid(row=0, column=0, sticky="nsew")
         root.columnconfigure(0, weight=1)
-        root.rowconfigure(2, weight=1)
+        root.rowconfigure(0, weight=1)
 
-        shell = tk.Frame(root, bg=bg)
-        shell.grid(row=0, column=0, sticky="nsew", padx=26, pady=22)
+        canvas = tk.Canvas(root, bg=bg, highlightthickness=0, borderwidth=0)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        page_scrollbar = ttk.Scrollbar(root, orient="vertical", command=canvas.yview)
+        page_scrollbar.grid(row=0, column=1, sticky="ns")
+        canvas.configure(yscrollcommand=page_scrollbar.set)
+
+        shell = tk.Frame(canvas, bg=bg)
+        shell_window = canvas.create_window((0, 0), window=shell, anchor="nw")
         shell.columnconfigure(0, weight=1)
         shell.rowconfigure(2, weight=1)
+        shell.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda event: canvas.itemconfigure(shell_window, width=event.width))
+        self._bind_mousewheel(canvas)
 
         header = tk.Frame(shell, bg="#0f172a", padx=26, pady=22)
         header.grid(row=0, column=0, sticky="ew")
@@ -472,7 +483,7 @@ class StreamDownloaderApp(BaseTk):
 
         action_row = tk.Frame(form, bg=panel)
         action_row.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(18, 0))
-        for column in range(6):
+        for column in range(4):
             action_row.columnconfigure(column, weight=1)
         self.download_button = make_button(action_row, self.t("download"), self._start_download, "primary")
         self.download_button.grid(row=0, column=0, sticky="ew", padx=(0, 8), pady=(0, 8))
@@ -481,19 +492,7 @@ class StreamDownloaderApp(BaseTk):
         self.cancel_button = make_button(action_row, self.t("cancel"), self._cancel_download, "danger", state="disabled")
         self.cancel_button.grid(row=0, column=2, sticky="ew", padx=(0, 8), pady=(0, 8))
         self.open_folder_button = make_button(action_row, self.t("folder"), self._open_output_folder, state="disabled")
-        self.open_folder_button.grid(row=0, column=3, sticky="ew", padx=(0, 8), pady=(0, 8))
-        make_button(action_row, self.t("open_save"), self._open_save_folder, "secondary").grid(row=0, column=4, sticky="ew", padx=(0, 8), pady=(0, 8))
-        self.probe_file_button = make_button(action_row, self.t("check_file"), self._select_and_probe_file)
-        self.probe_file_button.grid(row=0, column=5, sticky="ew", pady=(0, 8))
-        self.repair_file_button = make_button(action_row, self.t("repair_file"), self._select_and_repair_file)
-        self.repair_file_button.grid(row=1, column=0, sticky="ew", padx=(0, 8))
-        self.update_ytdlp_button = make_button(action_row, self.t("update_ytdlp"), self._start_update_ytdlp)
-        self.update_ytdlp_button.grid(row=1, column=1, sticky="ew", padx=(0, 8))
-        self.check_update_button = make_button(action_row, self.t("update_app"), self._start_app_update_check)
-        self.check_update_button.grid(row=1, column=2, sticky="ew", padx=(0, 8))
-        make_button(action_row, self.t("clear_log"), self._clear_log, "ghost").grid(row=1, column=3, sticky="ew", padx=(0, 8))
-        self.open_log_button = make_button(action_row, self.t("log"), self._open_log_folder, "ghost")
-        self.open_log_button.grid(row=1, column=4, sticky="ew", padx=(0, 8))
+        self.open_folder_button.grid(row=0, column=3, sticky="ew", pady=(0, 8))
 
         side = tk.Frame(main, bg=panel, padx=18, pady=18, highlightthickness=1, highlightbackground="#e1e8f2")
         side.grid(row=0, column=1, sticky="nsew")
@@ -545,7 +544,24 @@ class StreamDownloaderApp(BaseTk):
         tk.Label(preview, text="Preview", bg=soft, fg=ink, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
         tk.Label(preview, textvariable=self.preview_var, bg=soft, fg=muted, wraplength=270, justify="left", font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
-        tk.Label(side, text=self.t("history"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=7, column=0, sticky="w", pady=(18, 6))
+        tools = tk.Frame(side, bg=panel)
+        tools.grid(row=7, column=0, sticky="ew", pady=(18, 0))
+        tools.columnconfigure((0, 1), weight=1)
+        tk.Label(tools, text=self.t("tools"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        make_button(tools, self.t("open_save"), self._open_save_folder, "secondary").grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
+        self.probe_file_button = make_button(tools, self.t("check_file"), self._select_and_probe_file)
+        self.probe_file_button.grid(row=1, column=1, sticky="ew", pady=(0, 6))
+        self.repair_file_button = make_button(tools, self.t("repair_file"), self._select_and_repair_file)
+        self.repair_file_button.grid(row=2, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
+        self.update_ytdlp_button = make_button(tools, self.t("update_ytdlp"), self._start_update_ytdlp)
+        self.update_ytdlp_button.grid(row=2, column=1, sticky="ew", pady=(0, 6))
+        self.check_update_button = make_button(tools, self.t("update_app"), self._start_app_update_check)
+        self.check_update_button.grid(row=3, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
+        make_button(tools, self.t("clear_log"), self._clear_log, "ghost").grid(row=3, column=1, sticky="ew", pady=(0, 6))
+        self.open_log_button = make_button(tools, self.t("log"), self._open_log_folder, "ghost")
+        self.open_log_button.grid(row=4, column=0, columnspan=2, sticky="ew")
+
+        tk.Label(side, text=self.t("history"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=8, column=0, sticky="w", pady=(18, 6))
         self.history_listbox = tk.Listbox(
             side,
             height=5,
@@ -557,10 +573,10 @@ class StreamDownloaderApp(BaseTk):
             highlightbackground="#d9e2ef",
             font=("TkDefaultFont", 10),
         )
-        self.history_listbox.grid(row=8, column=0, sticky="ew", pady=(0, 10))
+        self.history_listbox.grid(row=9, column=0, sticky="ew", pady=(0, 10))
         self.history_listbox.bind("<<ListboxSelect>>", self._on_history_select)
         history_buttons = tk.Frame(side, bg=panel)
-        history_buttons.grid(row=9, column=0, sticky="ew")
+        history_buttons.grid(row=10, column=0, sticky="ew")
         history_buttons.columnconfigure((0, 1, 2), weight=1)
         make_button(history_buttons, self.t("open"), self._open_history_file, "secondary").grid(row=0, column=0, sticky="ew", padx=(0, 6))
         make_button(history_buttons, self.t("folder"), self._open_history_folder, "secondary").grid(row=0, column=1, sticky="ew", padx=(0, 6))
@@ -611,6 +627,21 @@ class StreamDownloaderApp(BaseTk):
             return
         messagebox.showerror("Missing dependencies", dependency_instructions(missing))
         self._append_log(dependency_instructions(missing) + "\n")
+
+    def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
+        def on_mousewheel(event: tk.Event) -> None:
+            if getattr(event, "num", None) == 4:
+                canvas.yview_scroll(-3, "units")
+            elif getattr(event, "num", None) == 5:
+                canvas.yview_scroll(3, "units")
+            else:
+                delta = int(-1 * (event.delta / 120)) if event.delta else 0
+                if delta:
+                    canvas.yview_scroll(delta * 3, "units")
+
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
+        canvas.bind_all("<Button-4>", on_mousewheel)
+        canvas.bind_all("<Button-5>", on_mousewheel)
 
     def _on_language_changed(self, _event: object | None = None) -> None:
         self._save_current_config()
