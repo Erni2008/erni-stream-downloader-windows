@@ -84,6 +84,8 @@ class DownloadRequest:
     download_mode: str
     use_temp_first: bool
     estimated_size: int | None = None
+    allow_playlist: bool = False
+    playlist_limit: int = 10
 
 
 @dataclass
@@ -91,6 +93,7 @@ class DownloadResult:
     success: bool
     message: str
     output_file: Path | None = None
+    output_files: list[Path] | None = None
     temp_directory: Path | None = None
     raw_output: str = ""
     log_file: Path | None = None
@@ -196,8 +199,8 @@ class DownloadWorker:
                 )
                 return
 
-            downloaded_file = self._find_new_media_file(actual_download_dir, before_files)
-            if not downloaded_file:
+            downloaded_files = self._find_new_media_files(actual_download_dir, before_files)
+            if not downloaded_files:
                 self.on_status("Error")
                 self.on_finish(
                     DownloadResult(
@@ -209,14 +212,17 @@ class DownloadWorker:
                 )
                 return
 
-            downloaded_file = self._ensure_player_compatible_file(downloaded_file)
-            final_file = downloaded_file
+            final_files = [self._ensure_player_compatible_file(path) for path in downloaded_files]
             if self.request.use_temp_first:
                 self.on_status("Copying")
-                final_file = self._copy_to_destination(downloaded_file, self.request.save_directory)
-                downloaded_file.unlink(missing_ok=True)
+                copied_files: list[Path] = []
+                for downloaded_file in final_files:
+                    copied_files.append(self._copy_to_destination(downloaded_file, self.request.save_directory))
+                    downloaded_file.unlink(missing_ok=True)
+                final_files = copied_files
                 self._try_remove_empty_temp_dir(temp_dir)
 
+            final_file = final_files[0]
             self.on_progress(100)
             self.on_status("Finished")
             self.on_finish(
@@ -224,6 +230,7 @@ class DownloadWorker:
                     success=True,
                     message="Download finished successfully.",
                     output_file=final_file,
+                    output_files=final_files,
                     temp_directory=temp_dir,
                     raw_output=raw_output,
                 )
@@ -247,8 +254,13 @@ class DownloadWorker:
             yt_dlp,
             "--newline",
             "--no-color",
-            "--no-playlist",
         ]
+
+        if self.request.allow_playlist:
+            limit = max(1, min(int(self.request.playlist_limit or 1), 200))
+            command.extend(["--yes-playlist", "--playlist-end", str(limit)])
+        else:
+            command.append("--no-playlist")
 
         if self._is_thumbnail_mode():
             command.extend(["--skip-download", "--write-thumbnail", "--convert-thumbnails", "jpg"])
@@ -500,7 +512,7 @@ class DownloadWorker:
         return {path for path in directory.rglob("*") if path.is_file()}
 
     @staticmethod
-    def _find_new_media_file(directory: Path, before_files: set[Path]) -> Path | None:
+    def _find_new_media_files(directory: Path, before_files: set[Path]) -> list[Path]:
         ignored_suffixes = {".part", ".ytdl", ".temp", ".tmp"}
         candidates = [
             path
@@ -510,9 +522,7 @@ class DownloadWorker:
             and path.suffix.lower() not in ignored_suffixes
             and not path.name.endswith(".part-Frag")
         ]
-        if not candidates:
-            return None
-        return max(candidates, key=lambda path: path.stat().st_size)
+        return sorted(candidates, key=lambda path: path.stat().st_mtime)
 
     @staticmethod
     def _unique_destination(path: Path) -> Path:

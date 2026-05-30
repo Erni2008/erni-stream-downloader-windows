@@ -19,7 +19,7 @@ except Exception:  # Drag-and-drop stays optional.
     DND_TEXT = None
     TkinterDnD = None
 
-from downloader.config import AppConfig, get_log_path, load_config, load_history, save_config, save_history
+from downloader.config import AppConfig, get_config_dir, get_log_path, load_config, load_history, save_config, save_history
 from downloader.core import DOWNLOAD_MODE_DESCRIPTIONS, DOWNLOAD_MODES, DownloadRequest, DownloadResult, DownloadWorker, QUALITY_FORMATS
 from downloader.media import MediaReport, probe_media, repair_to_universal_mp4, report_to_text
 from downloader.utils import (
@@ -36,7 +36,7 @@ from downloader.utils import (
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 GITHUB_RELEASES = {
     "Darwin": "https://api.github.com/repos/Erni2008/erni-stream-downloader-macos/releases/latest",
     "Windows": "https://api.github.com/repos/Erni2008/erni-stream-downloader-windows/releases/latest",
@@ -105,6 +105,14 @@ I18N = {
         "preset": "Режим",
         "remove": "Удалить",
         "clear": "Очистить",
+        "playlist_mode": "Скачивать плейлист / профиль",
+        "playlist_hint": "Используй только для публичных видео, на которые у тебя есть право. Чтобы случайно не скачать слишком много, есть лимит.",
+        "playlist_limit": "Лимит видео",
+        "pause_queue": "Пауза после текущего",
+        "resume_queue": "Продолжить очередь",
+        "result": "Результат файла",
+        "result_empty": "После загрузки здесь появится проверка: видео, звук, codec, FPS и совместимость.",
+        "thumbnail": "Превью",
         "drop_ready": "Перетащи сюда YouTube-ссылку или текст",
         "drop_added": "Добавлено из drag-and-drop",
         "status_ready": "Готово",
@@ -165,6 +173,14 @@ I18N = {
         "preset": "Mode",
         "remove": "Remove",
         "clear": "Clear",
+        "playlist_mode": "Download playlist / profile",
+        "playlist_hint": "Use only for public videos you own or have permission for. A limit prevents accidental bulk downloads.",
+        "playlist_limit": "Video limit",
+        "pause_queue": "Pause after current",
+        "resume_queue": "Resume queue",
+        "result": "File result",
+        "result_empty": "After download, this card will show video, audio, codec, FPS, and compatibility.",
+        "thumbnail": "Thumbnail",
         "drop_ready": "Drop a YouTube link or text here",
         "drop_added": "Added from drag-and-drop",
         "status_ready": "Ready",
@@ -194,6 +210,7 @@ class StreamDownloaderApp(BaseTk):
         self.last_output_file: Path | None = None
         self.log_file = get_log_path()
         self.pending_urls: list[str] = []
+        self.queue_paused = False
         self.queue_urls: list[str] = []
         self.queue_row_ids: dict[str, str] = {}
         self.active_url: str | None = None
@@ -221,12 +238,16 @@ class StreamDownloaderApp(BaseTk):
         self.mode_hint_var = tk.StringVar(value=DOWNLOAD_MODE_DESCRIPTIONS.get(initial_mode, ""))
         self.language_var = tk.StringVar(value=self.config_data.language if self.config_data.language in I18N else "RU")
         self.temp_first_var = tk.BooleanVar(value=self.config_data.use_temp_first)
+        self.allow_playlist_var = tk.BooleanVar(value=self.config_data.allow_playlist)
+        self.playlist_limit_var = tk.IntVar(value=max(1, min(int(self.config_data.playlist_limit or 10), 200)))
         self.status_key = "Idle"
         self.status_var = tk.StringVar(value=self._status_label("Idle"))
         self.percent_var = tk.StringVar(value="0%")
         self.tools_var = tk.StringVar(value="Checking tools...")
         self.preview_var = tk.StringVar(value="Preview will appear after analysis.")
+        self.result_var = tk.StringVar(value=self.t("result_empty"))
         self.platform_var = tk.StringVar(value=self.t("platform_waiting"))
+        self.thumbnail_image: tk.PhotoImage | None = None
         self.url_var.trace_add("write", self._on_url_changed)
 
         self._configure_style()
@@ -467,6 +488,7 @@ class StreamDownloaderApp(BaseTk):
 
         option_box = tk.Frame(form, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
         option_box.grid(row=10, column=1, columnspan=2, sticky="ew", padx=12, pady=(2, 4))
+        option_box.columnconfigure(0, weight=1)
         tk.Checkbutton(
             option_box,
             text=self.t("temp_first"),
@@ -480,6 +502,34 @@ class StreamDownloaderApp(BaseTk):
             bd=0,
         ).grid(row=0, column=0, sticky="w")
         tk.Label(option_box, text=self.t("temp_hint"), bg=soft, fg=muted, font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        tk.Checkbutton(
+            option_box,
+            text=self.t("playlist_mode"),
+            variable=self.allow_playlist_var,
+            bg=soft,
+            fg=ink,
+            activebackground=soft,
+            selectcolor="#ffffff",
+            font=("TkDefaultFont", 10, "bold"),
+            relief="flat",
+            bd=0,
+        ).grid(row=2, column=0, sticky="w", pady=(10, 0))
+        playlist_controls = tk.Frame(option_box, bg=soft)
+        playlist_controls.grid(row=3, column=0, sticky="ew", pady=(4, 0))
+        tk.Label(playlist_controls, text=self.t("playlist_limit"), bg=soft, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Spinbox(
+            playlist_controls,
+            from_=1,
+            to=200,
+            textvariable=self.playlist_limit_var,
+            width=6,
+            bg="#ffffff",
+            fg=ink,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#d9e2ef",
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        tk.Label(option_box, text=self.t("playlist_hint"), bg=soft, fg=muted, wraplength=690, justify="left", font=("TkDefaultFont", 9)).grid(row=4, column=0, sticky="w", pady=(4, 0))
 
         action_row = tk.Frame(form, bg=panel)
         action_row.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(18, 0))
@@ -521,10 +571,12 @@ class StreamDownloaderApp(BaseTk):
         self.queue_table.grid(row=3, column=0, sticky="ew", pady=(12, 10))
         queue_buttons = tk.Frame(side, bg=panel)
         queue_buttons.grid(row=4, column=0, sticky="ew")
-        queue_buttons.columnconfigure((0, 1, 2), weight=1)
+        queue_buttons.columnconfigure((0, 1, 2, 3), weight=1)
         make_button(queue_buttons, "+", self._add_url_to_queue, "secondary").grid(row=0, column=0, sticky="ew", padx=(0, 6))
         make_button(queue_buttons, self.t("remove"), self._remove_selected_queue_item, "secondary").grid(row=0, column=1, sticky="ew", padx=(0, 6))
-        make_button(queue_buttons, self.t("clear"), self._clear_queue_items, "secondary").grid(row=0, column=2, sticky="ew")
+        make_button(queue_buttons, self.t("clear"), self._clear_queue_items, "secondary").grid(row=0, column=2, sticky="ew", padx=(0, 6))
+        self.pause_queue_button = make_button(queue_buttons, self.t("pause_queue"), self._toggle_queue_pause, "secondary")
+        self.pause_queue_button.grid(row=0, column=3, sticky="ew")
 
         tips = tk.Frame(side, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
         tips.grid(row=5, column=0, sticky="ew", pady=(18, 0))
@@ -541,11 +593,27 @@ class StreamDownloaderApp(BaseTk):
 
         preview = tk.Frame(side, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
         preview.grid(row=6, column=0, sticky="ew", pady=(14, 0))
-        tk.Label(preview, text="Preview", bg=soft, fg=ink, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
-        tk.Label(preview, textvariable=self.preview_var, bg=soft, fg=muted, wraplength=270, justify="left", font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(6, 0))
+        preview.columnconfigure(0, weight=1)
+        tk.Label(preview, text=self.t("thumbnail"), bg=soft, fg=ink, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
+        self.thumbnail_label = tk.Label(
+            preview,
+            text="No preview",
+            bg="#e5edf7",
+            fg=muted,
+            height=7,
+            relief="flat",
+            font=("TkDefaultFont", 10, "bold"),
+        )
+        self.thumbnail_label.grid(row=1, column=0, sticky="ew", pady=(8, 10))
+        tk.Label(preview, textvariable=self.preview_var, bg=soft, fg=muted, wraplength=270, justify="left", font=("TkDefaultFont", 9)).grid(row=2, column=0, sticky="w")
+
+        result_card = tk.Frame(side, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
+        result_card.grid(row=7, column=0, sticky="ew", pady=(14, 0))
+        tk.Label(result_card, text=self.t("result"), bg=soft, fg=ink, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(result_card, textvariable=self.result_var, bg=soft, fg=muted, wraplength=270, justify="left", font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
         tools = tk.Frame(side, bg=panel)
-        tools.grid(row=7, column=0, sticky="ew", pady=(18, 0))
+        tools.grid(row=8, column=0, sticky="ew", pady=(18, 0))
         tools.columnconfigure((0, 1), weight=1)
         tk.Label(tools, text=self.t("tools"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
         make_button(tools, self.t("open_save"), self._open_save_folder, "secondary").grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
@@ -561,7 +629,7 @@ class StreamDownloaderApp(BaseTk):
         self.open_log_button = make_button(tools, self.t("log"), self._open_log_folder, "ghost")
         self.open_log_button.grid(row=4, column=0, columnspan=2, sticky="ew")
 
-        tk.Label(side, text=self.t("history"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=8, column=0, sticky="w", pady=(18, 6))
+        tk.Label(side, text=self.t("history"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=9, column=0, sticky="w", pady=(18, 6))
         self.history_listbox = tk.Listbox(
             side,
             height=5,
@@ -573,10 +641,10 @@ class StreamDownloaderApp(BaseTk):
             highlightbackground="#d9e2ef",
             font=("TkDefaultFont", 10),
         )
-        self.history_listbox.grid(row=9, column=0, sticky="ew", pady=(0, 10))
+        self.history_listbox.grid(row=10, column=0, sticky="ew", pady=(0, 10))
         self.history_listbox.bind("<<ListboxSelect>>", self._on_history_select)
         history_buttons = tk.Frame(side, bg=panel)
-        history_buttons.grid(row=10, column=0, sticky="ew")
+        history_buttons.grid(row=11, column=0, sticky="ew")
         history_buttons.columnconfigure((0, 1, 2), weight=1)
         make_button(history_buttons, self.t("open"), self._open_history_file, "secondary").grid(row=0, column=0, sticky="ew", padx=(0, 6))
         make_button(history_buttons, self.t("folder"), self._open_history_folder, "secondary").grid(row=0, column=1, sticky="ew", padx=(0, 6))
@@ -657,6 +725,9 @@ class StreamDownloaderApp(BaseTk):
         if not url:
             self.preview_var.set("Preview will appear after analysis.")
             self.platform_var.set(self.t("platform_waiting"))
+            if hasattr(self, "thumbnail_label"):
+                self.thumbnail_label.configure(image="", text="No preview")
+                self.thumbnail_image = None
             return
         platform_name = detect_platform(url)
         if platform_name != "Unknown":
@@ -833,6 +904,15 @@ class StreamDownloaderApp(BaseTk):
         return clean[:42] + ("..." if len(clean) > 42 else "")
 
     def _start_download(self) -> None:
+        if self.pending_urls and self.queue_paused and not self.worker:
+            self.queue_paused = False
+            self._refresh_pause_button()
+            self.download_button.configure(state="disabled")
+            self.cancel_button.configure(state="normal")
+            self._append_log("\nОчередь продолжена.\n")
+            self._start_next_download()
+            return
+
         urls = self._collect_download_urls()
         if not urls:
             return
@@ -850,6 +930,8 @@ class StreamDownloaderApp(BaseTk):
             f"Format: {self.format_var.get()}\n"
             f"Mode: {self.mode_var.get()}\n"
             f"Temp first: {self.temp_first_var.get()}\n\n"
+            f"Playlist/profile mode: {self.allow_playlist_var.get()}\n"
+            f"Playlist limit: {self._playlist_limit()}\n\n"
         )
         self._start_next_download()
 
@@ -895,12 +977,32 @@ class StreamDownloaderApp(BaseTk):
             if not proceed:
                 return None
 
+        if self.allow_playlist_var.get():
+            proceed = messagebox.askyesno(
+                self.t("playlist_mode"),
+                "Этот режим может скачать несколько видео из плейлиста/профиля.\n\n"
+                f"Лимит: {self._playlist_limit()} видео.\n"
+                "Используй только публичные видео, на которые у тебя есть право.\n\n"
+                "Продолжить?",
+            )
+            if not proceed:
+                return None
+
         self._save_current_config()
         return urls
 
     def _start_next_download(self) -> None:
+        if self.queue_paused:
+            self.worker = None
+            self.download_button.configure(text=self.t("resume_queue"), state="normal")
+            self.cancel_button.configure(state="disabled")
+            self._set_status("Idle")
+            self._append_log(f"\nОчередь на паузе. Осталось: {len(self.pending_urls)}\n")
+            return
+
         if not self.pending_urls:
             self.download_button.configure(state="normal")
+            self.download_button.configure(text=self.t("download"))
             self.cancel_button.configure(state="disabled")
             self._set_status("Finished")
             messagebox.showinfo("Finished", "Очередь загрузок завершена.")
@@ -932,6 +1034,7 @@ class StreamDownloaderApp(BaseTk):
             )
             self._append_log(self._analysis_message(analysis) + "\n")
             self.preview_var.set(self._preview_message(analysis))
+            self._start_thumbnail_fetch(analysis)
         else:
             self._append_log("Автоанализ не удался. Продолжаю без точной оценки размера.\n")
 
@@ -943,6 +1046,8 @@ class StreamDownloaderApp(BaseTk):
             download_mode=self.mode_var.get(),
             use_temp_first=self.temp_first_var.get(),
             estimated_size=estimated_size,
+            allow_playlist=self.allow_playlist_var.get(),
+            playlist_limit=self._playlist_limit(),
         )
 
         self.worker = DownloadWorker(
@@ -956,6 +1061,33 @@ class StreamDownloaderApp(BaseTk):
         self.cancel_button.configure(state="normal")
         self._set_status("Downloading")
         self.worker.start()
+
+    def _toggle_queue_pause(self) -> None:
+        self.queue_paused = not self.queue_paused
+        self._refresh_pause_button()
+        if self.queue_paused:
+            self._append_log("\nПауза включена: текущая загрузка завершится, следующая не начнётся.\n")
+        else:
+            self._append_log("\nПауза выключена.\n")
+            if self.pending_urls and not self.worker:
+                self.download_button.configure(state="disabled")
+                self.cancel_button.configure(state="normal")
+                self._start_next_download()
+
+    def _refresh_pause_button(self) -> None:
+        if hasattr(self, "pause_queue_button"):
+            self.pause_queue_button.configure(text=self.t("resume_queue") if self.queue_paused else self.t("pause_queue"))
+        if hasattr(self, "download_button") and self.queue_paused and self.pending_urls and not self.worker:
+            self.download_button.configure(text=self.t("resume_queue"))
+        elif hasattr(self, "download_button"):
+            self.download_button.configure(text=self.t("download"))
+
+    def _playlist_limit(self) -> int:
+        try:
+            value = int(self.playlist_limit_var.get())
+        except (tk.TclError, ValueError):
+            value = 10
+        return max(1, min(value, 200))
 
     def _start_quality_check(self) -> None:
         url = self.url_var.get().strip()
@@ -1247,6 +1379,8 @@ class StreamDownloaderApp(BaseTk):
 
     def _cancel_download(self) -> None:
         self.pending_urls.clear()
+        self.queue_paused = False
+        self._refresh_pause_button()
         if self.worker:
             self.worker.cancel()
         self.cancel_button.configure(state="disabled")
@@ -1298,6 +1432,8 @@ class StreamDownloaderApp(BaseTk):
                     self._handle_finish(payload)  # type: ignore[arg-type]
                 elif event == "quality_result":
                     self._handle_quality_result(payload)  # type: ignore[arg-type]
+                elif event == "thumbnail_result":
+                    self._handle_thumbnail_result(payload)  # type: ignore[arg-type]
                 elif event == "update_ytdlp_result":
                     self._handle_update_ytdlp_result(payload)  # type: ignore[arg-type]
                 elif event == "probe_result":
@@ -1329,6 +1465,7 @@ class StreamDownloaderApp(BaseTk):
             size = analysis.get("estimated_size")
             self.last_analysis_size = size if isinstance(size, int) else None
             self.preview_var.set(self._preview_message(analysis))
+            self._start_thumbnail_fetch(analysis)
             self._append_log("\n" + self._analysis_message(analysis) + "\n")
         if max_height:
             self._append_log(f"Максимум найдено: {max_height}p\n")
@@ -1339,8 +1476,96 @@ class StreamDownloaderApp(BaseTk):
         else:
             messagebox.showwarning("Рекомендация по качеству", message)
 
+    def _start_thumbnail_fetch(self, analysis: dict[str, object]) -> None:
+        thumbnail = analysis.get("thumbnail")
+        if not isinstance(thumbnail, str) or not thumbnail:
+            if hasattr(self, "thumbnail_label"):
+                self.thumbnail_label.configure(image="", text="No preview")
+                self.thumbnail_image = None
+            return
+        if hasattr(self, "thumbnail_label"):
+            self.thumbnail_label.configure(image="", text="Loading preview...")
+        thread = threading.Thread(target=self._thumbnail_worker, args=(thumbnail,), daemon=True)
+        thread.start()
+
+    def _thumbnail_worker(self, thumbnail_url: str) -> None:
+        try:
+            thumb_dir = get_config_dir() / "thumbnails"
+            thumb_dir.mkdir(parents=True, exist_ok=True)
+            raw_path = thumb_dir / "latest-thumbnail"
+            png_path = thumb_dir / "latest-thumbnail.png"
+            request = urllib.request.Request(thumbnail_url, headers={"User-Agent": APP_TITLE})
+            with urllib.request.urlopen(request, timeout=15) as response:
+                raw_path.write_bytes(response.read())
+
+            ffmpeg = find_executable("ffmpeg")
+            if ffmpeg:
+                completed = subprocess.run(
+                    [
+                        ffmpeg,
+                        "-y",
+                        "-i",
+                        str(raw_path),
+                        "-vf",
+                        "scale=320:-1",
+                        "-frames:v",
+                        "1",
+                        str(png_path),
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=20,
+                    check=False,
+                )
+                if completed.returncode == 0 and png_path.exists():
+                    self.event_queue.put(("thumbnail_result", png_path))
+                    return
+            self.event_queue.put(("thumbnail_result", None))
+        except Exception:
+            self.event_queue.put(("thumbnail_result", None))
+
+    def _handle_thumbnail_result(self, path: Path | None) -> None:
+        if not hasattr(self, "thumbnail_label"):
+            return
+        if not path or not path.exists():
+            self.thumbnail_label.configure(image="", text="Preview unavailable")
+            self.thumbnail_image = None
+            return
+        try:
+            image = tk.PhotoImage(file=str(path))
+        except tk.TclError:
+            self.thumbnail_label.configure(image="", text="Preview unavailable")
+            self.thumbnail_image = None
+            return
+        self.thumbnail_image = image
+        self.thumbnail_label.configure(image=image, text="")
+
+    def _result_card_text(self, path: Path, report: MediaReport) -> str:
+        verdict = "OK: файл совместим" if report.compatible else "Нужно починить: " + report.message
+        video = "есть" if report.has_video else "нет картинки"
+        audio = "есть" if report.has_audio else "нет звука"
+        resolution = f"{report.width}x{report.height}" if report.width and report.height else "unknown"
+        fps = f"{report.fps:g}" if report.fps else "unknown"
+        duration = self._format_duration(report.duration) if report.duration else "unknown"
+        return "\n".join(
+            [
+                path.name,
+                verdict,
+                f"Видео: {video}",
+                f"Звук: {audio}",
+                f"Resolution: {resolution}",
+                f"FPS: {fps}",
+                f"Codecs: {report.video_codec or 'unknown'} / {report.audio_codec or 'unknown'}",
+                f"Duration: {duration}",
+            ]
+        )
+
     def _handle_finish(self, result: DownloadResult) -> None:
         self.cancel_button.configure(state="disabled")
+        self.worker = None
 
         if result.output_file:
             self.last_output_file = result.output_file
@@ -1354,18 +1579,33 @@ class StreamDownloaderApp(BaseTk):
                 self._queue_insert_or_update(self.active_url, status=self.t("done"), progress="100%")
             self._append_log(f"\n{result.message}\n")
             if result.output_file:
-                self._append_log(f"Saved file: {result.output_file}\n")
-                self._add_history_item(result.output_file, self.active_url or "")
+                output_files = result.output_files or [result.output_file]
+                if len(output_files) == 1:
+                    self._append_log(f"Saved file: {result.output_file}\n")
+                else:
+                    self._append_log(f"Saved files: {len(output_files)}\n")
+                    for path in output_files:
+                        self._append_log(f"- {path}\n")
+                for path in output_files:
+                    self._add_history_item(path, self.active_url or "")
                 report = probe_media(result.output_file)
                 self._append_log("\nПроверка готового файла:\n" + report_to_text(report) + "\n")
+                self.result_var.set(self._result_card_text(result.output_file, report))
                 if not report.has_video or not report.has_audio:
                     messagebox.showwarning("Проблема в файле", report.message)
             self._append_log(f"Log file: {self.log_file}\n")
             if self.pending_urls:
+                if self.queue_paused:
+                    self.download_button.configure(text=self.t("resume_queue"), state="normal")
+                    self._append_log(f"\nОчередь поставлена на паузу. Осталось: {len(self.pending_urls)}\n")
+                    messagebox.showinfo(self.t("queue"), f"Пауза после текущего файла.\nОсталось в очереди: {len(self.pending_urls)}")
+                    return
                 self._append_log(f"\nОсталось в очереди: {len(self.pending_urls)}\n")
                 self._start_next_download()
                 return
             self.download_button.configure(state="normal")
+            self.queue_paused = False
+            self._refresh_pause_button()
             messagebox.showinfo("Finished", "Все загрузки завершены.")
             return
 
@@ -1373,6 +1613,8 @@ class StreamDownloaderApp(BaseTk):
         if self.active_url:
             self._queue_insert_or_update(self.active_url, status="Ошибка")
         self.pending_urls.clear()
+        self.queue_paused = False
+        self._refresh_pause_button()
         if self.status_key != "Idle":
             self._set_status("Error")
         self._append_log(f"\n{result.message}\n")
@@ -1397,6 +1639,7 @@ class StreamDownloaderApp(BaseTk):
     def _handle_probe_result(self, report: MediaReport) -> None:
         text = report_to_text(report)
         self._append_log(text + "\n")
+        self.result_var.set(self._result_card_text(report.path, report))
         if report.compatible:
             messagebox.showinfo("Проверка файла", text)
         else:
@@ -1439,6 +1682,7 @@ class StreamDownloaderApp(BaseTk):
         self._append_log(f"\nГотовый universal MP4:\n{repaired}\n")
         if report:
             self._append_log("\nПроверка файла после ремонта:\n" + report_to_text(report) + "\n")
+            self.result_var.set(self._result_card_text(repaired, report))
         messagebox.showinfo(self.t("repair_file"), f"Готово:\n{repaired}")
 
     def _start_app_update_check(self) -> None:
@@ -1575,6 +1819,8 @@ class StreamDownloaderApp(BaseTk):
                 download_mode=self.mode_var.get(),
                 language=self.language_var.get(),
                 use_temp_first=self.temp_first_var.get(),
+                allow_playlist=self.allow_playlist_var.get(),
+                playlist_limit=self._playlist_limit(),
             )
         )
 

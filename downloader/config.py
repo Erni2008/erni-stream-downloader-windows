@@ -18,6 +18,8 @@ class AppConfig:
     download_mode: str = "For editing: universal"
     language: str = "RU"
     use_temp_first: bool = True
+    allow_playlist: bool = False
+    playlist_limit: int = 10
 
 
 def get_config_dir() -> Path:
