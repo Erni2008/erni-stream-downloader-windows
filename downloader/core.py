@@ -29,32 +29,48 @@ QUALITY_FORMATS = {
 }
 
 DOWNLOAD_MODES = [
-    "ВСЁ: максимально совместимый MP4",
-    "Смотреть в плеере (MP4, видео + звук)",
-    "Монтаж: Premiere / DaVinci / CapCut",
-    "Монтаж: VEGAS Pro",
-    "Монтаж: Final Cut / macOS",
-    "Архив: максимум качества без перекодирования",
+    "Original quality",
+    "Best quality MP4",
+    "For editing: universal",
+    "For editing: VEGAS Pro",
+    "For editing: Premiere / DaVinci / CapCut",
+    "For editing: Final Cut / macOS",
+    "For TikTok / Reels / Shorts",
+    "For archive",
+    "Audio only",
+    "Thumbnail only",
 ]
 
 DOWNLOAD_MODE_DESCRIPTIONS = {
-    "ВСЁ: максимально совместимый MP4": (
-        "Выбирай, если не хочешь думать о формате. На выходе один MP4 с видео + звуком: H.264 + AAC + constant FPS + yuv420p. Подходит почти для всего: плееры, телефоны, соцсети, Premiere, DaVinci, CapCut, VEGAS, Final Cut."
+    "Original quality": (
+        "Скачивает лучший доступный поток без перекодирования. Лучше всего для TikTok, Instagram, архива и случаев, где важно сохранить исходный FPS/resolution/codec."
     ),
-    "Смотреть в плеере (MP4, видео + звук)": (
-        "Готовый файл для обычного просмотра: H.264 + AAC, видео и звук в одном MP4."
+    "Best quality MP4": (
+        "Скачивает лучшее качество и делает один совместимый MP4 с H.264 + AAC. Хороший режим по умолчанию для просмотра и отправки."
     ),
-    "Монтаж: Premiere / DaVinci / CapCut": (
-        "Универсальный монтажный MP4: H.264 + AAC + constant FPS для Adobe Premiere, DaVinci Resolve и CapCut."
+    "For editing: universal": (
+        "Максимально совместимый MP4: H.264 + AAC + constant FPS + yuv420p. Подходит почти для всего: Premiere, DaVinci, CapCut, VEGAS, Final Cut и обычные плееры."
     ),
-    "Монтаж: VEGAS Pro": (
+    "For editing: VEGAS Pro": (
         "Самый совместимый вариант для VEGAS: H.264 + AAC + constant FPS + yuv420p."
     ),
-    "Монтаж: Final Cut / macOS": (
-        "MP4, который легче открывается на macOS и в Final Cut: H.264 + AAC + faststart."
+    "For editing: Premiere / DaVinci / CapCut": (
+        "Универсальный монтажный MP4: H.264 + AAC + constant FPS для Adobe Premiere, DaVinci Resolve и CapCut."
     ),
-    "Архив: максимум качества без перекодирования": (
-        "Сохраняет максимально близко к оригиналу YouTube. Файл может быть неидеален для монтажных программ."
+    "For editing: Final Cut / macOS": (
+        "MP4, который легче открывается на macOS и в Final Cut: H.264 + AAC + faststart + constant FPS."
+    ),
+    "For TikTok / Reels / Shorts": (
+        "Скачивает вертикальные ролики в лучшем доступном качестве и сохраняет как совместимый MP4 без лишних настроек."
+    ),
+    "For archive": (
+        "Сохраняет максимально близко к оригиналу платформы без перекодирования. Файл может быть неидеален для монтажных программ."
+    ),
+    "Audio only": (
+        "Скачивает только звук и сохраняет MP3. Полезно для подкастов, лекций, музыки и интервью."
+    ),
+    "Thumbnail only": (
+        "Скачивает только обложку/thumbnail, если платформа отдаёт превью."
     ),
 }
 
@@ -222,27 +238,41 @@ class DownloadWorker:
 
     def _build_command(self, output_dir: Path) -> list[str]:
         quality_selector = QUALITY_FORMATS[self.request.quality]
-        output_format = self.request.output_format.lower()
+        output_format = self._requested_container()
         output_template = str(output_dir / "%(title).200B.%(ext)s")
 
         yt_dlp = find_executable("yt-dlp") or "yt-dlp"
         ffmpeg = find_executable("ffmpeg")
         command = [
             yt_dlp,
-            "-f",
-            quality_selector,
-            "--merge-output-format",
-            output_format,
             "--newline",
             "--no-color",
+            "--no-playlist",
         ]
+
+        if self._is_thumbnail_mode():
+            command.extend(["--skip-download", "--write-thumbnail", "--convert-thumbnails", "jpg"])
+        elif self._is_audio_mode():
+            command.extend(["-f", "ba/bestaudio/best", "-x", "--audio-format", "mp3", "--audio-quality", "0"])
+        else:
+            command.extend(["-f", quality_selector, "--merge-output-format", output_format])
+
         if ffmpeg:
             command.extend(["--ffmpeg-location", str(Path(ffmpeg).parent)])
         command.extend(["-o", output_template, self.request.url])
         return command
 
+    def _requested_container(self) -> str:
+        if self._is_no_transcode_mode():
+            return "mkv"
+        if self._is_mp4_mode():
+            return "mp4"
+        return self.request.output_format.lower()
+
     def _ensure_player_compatible_file(self, source: Path) -> Path:
-        if self.request.output_format.upper() != "MP4":
+        if self._is_audio_mode() or self._is_thumbnail_mode():
+            return source
+        if self._requested_container().upper() != "MP4":
             return source
         if self._is_no_transcode_mode():
             self.on_log("\nSkipping MP4 compatibility conversion because no-transcode mode is selected.\n")
@@ -260,7 +290,7 @@ class DownloadWorker:
             final_target = self._unique_destination(final_target)
         temp_output = self._unique_destination(source.with_name(f"{source.stem}.encoding.mp4"))
         self.on_status("Converting")
-        if self.request.download_mode == "Монтаж: VEGAS Pro":
+        if self.request.download_mode == "For editing: VEGAS Pro":
             self.on_log(
                 "\nMaking MP4 compatible with VEGAS Pro: H.264 video + AAC audio + constant frame rate...\n"
             )
@@ -342,7 +372,7 @@ class DownloadWorker:
             return
         usage = shutil.disk_usage(destination)
         multiplier = 2.6 if (
-            self.request.output_format.upper() == "MP4"
+            self._requested_container().upper() == "MP4"
             and not self._is_no_transcode_mode()
         ) else 1.4
         required = int(self.request.estimated_size * multiplier)
@@ -354,10 +384,37 @@ class DownloadWorker:
             )
 
     def _is_no_transcode_mode(self) -> bool:
-        return "без перекодирования" in self.request.download_mode.lower() or self.request.download_mode.startswith("Архив:")
+        mode = self.request.download_mode.lower()
+        return (
+            "original quality" in mode
+            or "for archive" in mode
+            or "без перекодирования" in mode
+            or self.request.download_mode.startswith("Архив:")
+        )
 
     def _is_editing_mode(self) -> bool:
-        return self.request.download_mode.startswith("Монтаж:") or self.request.download_mode == "ВСЁ: максимально совместимый MP4"
+        mode = self.request.download_mode.lower()
+        return (
+            mode.startswith("for editing:")
+            or mode in {"best quality mp4", "for tiktok / reels / shorts"}
+            or self.request.download_mode.startswith("Монтаж:")
+            or self.request.download_mode == "ВСЁ: максимально совместимый MP4"
+        )
+
+    def _is_mp4_mode(self) -> bool:
+        mode = self.request.download_mode.lower()
+        return (
+            "mp4" in mode
+            or mode.startswith("for editing:")
+            or mode == "for tiktok / reels / shorts"
+            or self.request.output_format.upper() == "MP4"
+        )
+
+    def _is_audio_mode(self) -> bool:
+        return self.request.download_mode == "Audio only"
+
+    def _is_thumbnail_mode(self) -> bool:
+        return self.request.download_mode == "Thumbnail only"
 
     def _run_process(self, command: list[str]) -> int:
         creationflags = 0

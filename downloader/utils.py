@@ -89,12 +89,51 @@ def check_dependencies() -> tuple[bool, list[str]]:
     return not missing, missing
 
 
-def is_supported_youtube_url(url: str) -> bool:
+SUPPORTED_PLATFORM_HOSTS = {
+    "YouTube": ("youtube.com", "youtu.be", "youtube-nocookie.com"),
+    "TikTok": ("tiktok.com", "vm.tiktok.com", "vt.tiktok.com"),
+    "Instagram": ("instagram.com",),
+    "Twitch": ("twitch.tv",),
+    "Vimeo": ("vimeo.com",),
+    "Facebook": ("facebook.com", "fb.watch"),
+    "X / Twitter": ("x.com", "twitter.com"),
+    "Reddit": ("reddit.com", "redd.it"),
+    "VK": ("vk.com", "vkvideo.ru"),
+    "OK": ("ok.ru",),
+}
+
+
+def detect_platform(url: str) -> str:
+    parsed = urlparse(url.strip())
+    host = parsed.netloc.lower().removeprefix("www.").removeprefix("m.")
+    path = parsed.path.lower()
+    for platform_name, hosts in SUPPORTED_PLATFORM_HOSTS.items():
+        if any(host == item or host.endswith("." + item) for item in hosts):
+            if platform_name == "YouTube" and "/shorts/" in path:
+                return "YouTube Shorts"
+            if platform_name == "Instagram":
+                if "/reel/" in path or "/reels/" in path:
+                    return "Instagram Reels"
+                if "/p/" in path:
+                    return "Instagram Post"
+            if platform_name == "Twitch":
+                if "/videos/" in path:
+                    return "Twitch VOD"
+                if "/clip/" in path or "clips.twitch.tv" in host:
+                    return "Twitch Clip"
+            return platform_name
+    return "Unknown"
+
+
+def is_supported_media_url(url: str) -> bool:
     parsed = urlparse(url.strip())
     if parsed.scheme not in {"http", "https"}:
         return False
-    host = parsed.netloc.lower()
-    return host in {"youtu.be", "www.youtu.be"} or host.endswith("youtube.com")
+    return detect_platform(url) != "Unknown"
+
+
+def is_supported_youtube_url(url: str) -> bool:
+    return is_supported_media_url(url)
 
 
 def dependency_instructions(missing: list[str]) -> str:

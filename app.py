@@ -24,18 +24,19 @@ from downloader.core import DOWNLOAD_MODE_DESCRIPTIONS, DOWNLOAD_MODES, Download
 from downloader.media import MediaReport, probe_media, repair_to_universal_mp4, report_to_text
 from downloader.utils import (
     check_dependencies,
+    detect_platform,
     dependency_instructions,
     ensure_tool_path,
     find_executable,
     get_user_tool_path,
     is_probably_external_drive,
-    is_supported_youtube_url,
+    is_supported_media_url,
     open_folder,
 )
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 GITHUB_RELEASES = {
     "Darwin": "https://api.github.com/repos/Erni2008/erni-stream-downloader-macos/releases/latest",
     "Windows": "https://api.github.com/repos/Erni2008/erni-stream-downloader-windows/releases/latest",
@@ -91,7 +92,7 @@ I18N = {
         "progress": "ПРОГРЕСС",
         "download_log": "Журнал загрузки",
         "language": "Язык",
-        "youtube_url": "YouTube URL",
+        "youtube_url": "Video URL",
         "save_folder": "Папка сохранения",
         "format": "Формат",
         "preset": "Режим",
@@ -144,7 +145,7 @@ I18N = {
         "progress": "PROGRESS",
         "download_log": "Download log",
         "language": "Language",
-        "youtube_url": "YouTube URL",
+        "youtube_url": "Video URL",
         "save_folder": "Save folder",
         "format": "Format",
         "preset": "Mode",
@@ -193,7 +194,15 @@ class StreamDownloaderApp(BaseTk):
         self.format_var = tk.StringVar(value=self.config_data.output_format)
         initial_mode = self.config_data.download_mode
         if initial_mode not in DOWNLOAD_MODES:
-            initial_mode = "ВСЁ: максимально совместимый MP4"
+            legacy_modes = {
+                "ВСЁ: максимально совместимый MP4": "For editing: universal",
+                "Смотреть в плеере (MP4, видео + звук)": "Best quality MP4",
+                "Монтаж: Premiere / DaVinci / CapCut": "For editing: Premiere / DaVinci / CapCut",
+                "Монтаж: VEGAS Pro": "For editing: VEGAS Pro",
+                "Монтаж: Final Cut / macOS": "For editing: Final Cut / macOS",
+                "Архив: максимум качества без перекодирования": "For archive",
+            }
+            initial_mode = legacy_modes.get(initial_mode, "For editing: universal")
         self.mode_var = tk.StringVar(value=initial_mode)
         self.mode_hint_var = tk.StringVar(value=DOWNLOAD_MODE_DESCRIPTIONS.get(initial_mode, ""))
         self.language_var = tk.StringVar(value=self.config_data.language if self.config_data.language in I18N else "RU")
@@ -202,6 +211,8 @@ class StreamDownloaderApp(BaseTk):
         self.status_var = tk.StringVar(value=self._status_label("Idle"))
         self.percent_var = tk.StringVar(value="0%")
         self.tools_var = tk.StringVar(value="Checking tools...")
+        self.preview_var = tk.StringVar(value="Preview will appear after analysis.")
+        self.url_var.trace_add("write", self._on_url_changed)
 
         self._configure_style()
         self._build_ui()
@@ -460,19 +471,21 @@ class StreamDownloaderApp(BaseTk):
         tk.Label(side, text=self.t("queue_subtitle"), bg=panel, fg=muted, wraplength=260, justify="left", font=("TkDefaultFont", 10)).grid(row=2, column=0, sticky="w")
         self.queue_table = ttk.Treeview(
             side,
-            columns=("status", "quality", "size", "progress"),
+            columns=("platform", "status", "quality", "size", "progress"),
             show="tree headings",
             height=7,
         )
         self.queue_table.heading("#0", text=self.t("link"))
+        self.queue_table.heading("platform", text="Platform")
         self.queue_table.heading("status", text=self.t("status"))
         self.queue_table.heading("quality", text=self.t("quality"))
         self.queue_table.heading("size", text=self.t("size"))
         self.queue_table.heading("progress", text=self.t("done"))
-        self.queue_table.column("#0", width=190, minwidth=140, stretch=True)
+        self.queue_table.column("#0", width=160, minwidth=120, stretch=True)
+        self.queue_table.column("platform", width=92, minwidth=76, stretch=False)
         self.queue_table.column("status", width=82, minwidth=70, stretch=False)
-        self.queue_table.column("quality", width=90, minwidth=80, stretch=False)
-        self.queue_table.column("size", width=78, minwidth=68, stretch=False)
+        self.queue_table.column("quality", width=72, minwidth=66, stretch=False)
+        self.queue_table.column("size", width=72, minwidth=64, stretch=False)
         self.queue_table.column("progress", width=62, minwidth=56, stretch=False)
         self.queue_table.grid(row=3, column=0, sticky="ew", pady=(12, 10))
         queue_buttons = tk.Frame(side, bg=panel)
@@ -495,7 +508,12 @@ class StreamDownloaderApp(BaseTk):
             font=("TkDefaultFont", 9),
         ).grid(row=1, column=0, sticky="w", pady=(6, 0))
 
-        tk.Label(side, text=self.t("history"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=6, column=0, sticky="w", pady=(18, 6))
+        preview = tk.Frame(side, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
+        preview.grid(row=6, column=0, sticky="ew", pady=(14, 0))
+        tk.Label(preview, text="Preview", bg=soft, fg=ink, font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(preview, textvariable=self.preview_var, bg=soft, fg=muted, wraplength=270, justify="left", font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+        tk.Label(side, text=self.t("history"), bg=panel, fg=ink, font=("TkDefaultFont", 16, "bold")).grid(row=7, column=0, sticky="w", pady=(18, 6))
         self.history_listbox = tk.Listbox(
             side,
             height=5,
@@ -507,10 +525,10 @@ class StreamDownloaderApp(BaseTk):
             highlightbackground="#d9e2ef",
             font=("TkDefaultFont", 10),
         )
-        self.history_listbox.grid(row=7, column=0, sticky="ew", pady=(0, 10))
+        self.history_listbox.grid(row=8, column=0, sticky="ew", pady=(0, 10))
         self.history_listbox.bind("<<ListboxSelect>>", self._on_history_select)
         history_buttons = tk.Frame(side, bg=panel)
-        history_buttons.grid(row=8, column=0, sticky="ew")
+        history_buttons.grid(row=9, column=0, sticky="ew")
         history_buttons.columnconfigure((0, 1, 2), weight=1)
         make_button(history_buttons, self.t("open"), self._open_history_file, "secondary").grid(row=0, column=0, sticky="ew", padx=(0, 6))
         make_button(history_buttons, self.t("folder"), self._open_history_folder, "secondary").grid(row=0, column=1, sticky="ew", padx=(0, 6))
@@ -571,6 +589,15 @@ class StreamDownloaderApp(BaseTk):
         self._build_ui()
         self._append_log(f"{self.t('language')}: {self.language_var.get()}\n")
 
+    def _on_url_changed(self, *_args: object) -> None:
+        url = self.url_var.get().strip()
+        if not url:
+            self.preview_var.set("Preview will appear after analysis.")
+            return
+        platform_name = detect_platform(url)
+        if platform_name != "Unknown":
+            self.preview_var.set(f"Detected: {platform_name}\nClick Analyze to load title, quality, FPS, codecs and size.")
+
     def _enable_drag_and_drop(self, root: tk.Widget) -> None:
         if not DND_TEXT:
             self._append_log("Drag-and-drop недоступен: установи tkinterdnd2 из requirements.txt.\n")
@@ -603,7 +630,7 @@ class StreamDownloaderApp(BaseTk):
         for url in urls:
             if url not in self.queue_urls:
                 self.queue_urls.append(url)
-                self._queue_insert_or_update(url, status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
+                self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
                 added += 1
         self._append_log(f"{self.t('drop_added')}: {added}\n")
 
@@ -614,7 +641,7 @@ class StreamDownloaderApp(BaseTk):
         urls: list[str] = []
         for candidate in candidates:
             url = candidate.rstrip(".,);]")
-            if is_supported_youtube_url(url) and url not in urls:
+            if is_supported_media_url(url) and url not in urls:
                 urls.append(url)
         return urls
 
@@ -640,14 +667,14 @@ class StreamDownloaderApp(BaseTk):
         if not url:
             messagebox.showwarning(self.t("queue"), "Сначала вставь YouTube-ссылку.")
             return
-        if not is_supported_youtube_url(url):
-            messagebox.showwarning(self.t("queue"), "Это не похоже на YouTube-ссылку.")
+        if not is_supported_media_url(url):
+            messagebox.showwarning(self.t("queue"), "Эта платформа пока не поддерживается.")
             return
         if url in self.queue_urls:
             messagebox.showinfo(self.t("queue"), "Эта ссылка уже есть в очереди.")
             return
         self.queue_urls.append(url)
-        self._queue_insert_or_update(url, status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
+        self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
         self.url_var.set("")
 
     def _remove_selected_queue_item(self) -> None:
@@ -666,24 +693,39 @@ class StreamDownloaderApp(BaseTk):
         for row_id in self.queue_table.get_children():
             self.queue_table.delete(row_id)
 
-    def _queue_insert_or_update(self, url: str, status: str | None = None, quality: str | None = None, size: str | None = None, progress: str | None = None) -> None:
+    def _queue_insert_or_update(
+        self,
+        url: str,
+        platform: str | None = None,
+        status: str | None = None,
+        quality: str | None = None,
+        size: str | None = None,
+        progress: str | None = None,
+    ) -> None:
         row_id = self.queue_row_ids.get(url)
         if not row_id:
             label = self._short_url_label(url)
-            row_id = self.queue_table.insert("", "end", text=label, values=(status or "Ожидает", quality or self.quality_var.get(), size or "—", progress or "0%"))
+            row_id = self.queue_table.insert(
+                "",
+                "end",
+                text=label,
+                values=(platform or detect_platform(url), status or "Ожидает", quality or self.quality_var.get(), size or "—", progress or "0%"),
+            )
             self.queue_row_ids[url] = row_id
             return
         current = list(self.queue_table.item(row_id, "values"))
-        while len(current) < 4:
+        while len(current) < 5:
             current.append("")
+        if platform is not None:
+            current[0] = platform
         if status is not None:
-            current[0] = status
+            current[1] = status
         if quality is not None:
-            current[1] = quality
+            current[2] = quality
         if size is not None:
-            current[2] = size
+            current[3] = size
         if progress is not None:
-            current[3] = progress
+            current[4] = progress
         self.queue_table.item(row_id, values=tuple(current))
 
     def _url_from_queue_row(self, row_id: str) -> str:
@@ -705,7 +747,7 @@ class StreamDownloaderApp(BaseTk):
         for url in urls:
             if url not in self.queue_urls:
                 self.queue_urls.append(url)
-            self._queue_insert_or_update(url, status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
+            self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
         self._clear_log()
         self._write_log_file(
             f"\n=== {APP_TITLE} {APP_VERSION} session {datetime.now().isoformat(timespec='seconds')} ===\n"
@@ -725,14 +767,14 @@ class StreamDownloaderApp(BaseTk):
             urls.insert(0, typed_url)
 
         if not urls:
-            messagebox.showwarning("Missing URL", "Paste a YouTube URL first.")
+            messagebox.showwarning("Missing URL", "Paste a video URL first.")
             return None
 
-        invalid = [url for url in urls if not is_supported_youtube_url(url)]
+        invalid = [url for url in urls if not is_supported_media_url(url)]
         if invalid:
             messagebox.showwarning(
                 "Unsupported URL",
-                "В очереди есть ссылка, которая не похожа на YouTube:\n" + invalid[0],
+                "В очереди есть ссылка с неподдерживаемой платформой:\n" + invalid[0],
             )
             return None
 
@@ -784,6 +826,7 @@ class StreamDownloaderApp(BaseTk):
         self._set_status("Analyzing")
         self._queue_insert_or_update(url, status=self.t("analyze"), quality=self.quality_var.get(), progress="0%")
         self._append_log(f"\n--- Новая загрузка ---\nURL: {url}\n")
+        self._append_log(f"Detected: {detect_platform(url)}\n")
         analysis = self._analyze_video_sync(url)
         estimated_size = None
         if analysis:
@@ -795,6 +838,7 @@ class StreamDownloaderApp(BaseTk):
                 size=self._format_bytes(estimated_size) if isinstance(estimated_size, int) else "—",
             )
             self._append_log(self._analysis_message(analysis) + "\n")
+            self.preview_var.set(self._preview_message(analysis))
         else:
             self._append_log("Автоанализ не удался. Продолжаю без точной оценки размера.\n")
 
@@ -823,10 +867,10 @@ class StreamDownloaderApp(BaseTk):
     def _start_quality_check(self) -> None:
         url = self.url_var.get().strip()
         if not url:
-            messagebox.showwarning("Missing URL", "Paste a YouTube URL first.")
+            messagebox.showwarning("Missing URL", "Paste a video URL first.")
             return
-        if not is_supported_youtube_url(url):
-            messagebox.showwarning("Unsupported URL", "Please paste a valid YouTube URL.")
+        if not is_supported_media_url(url):
+            messagebox.showwarning("Unsupported URL", "Please paste a supported video URL.")
             return
 
         ok, missing = check_dependencies()
@@ -839,7 +883,7 @@ class StreamDownloaderApp(BaseTk):
         self.percent_var.set("0%")
         self.progress["value"] = 0
         self.check_quality_button.configure(state="disabled")
-        self._append_log("Проверяю доступные качества на YouTube...\n\n")
+        self._append_log(f"Проверяю ссылку. Platform: {detect_platform(url)}...\n\n")
 
         thread = threading.Thread(target=self._run_quality_check, args=(url,), daemon=True)
         thread.start()
@@ -913,23 +957,46 @@ class StreamDownloaderApp(BaseTk):
 
         formats = info.get("formats") or []
         heights: list[int] = []
+        widths: list[int] = []
         fps_values: list[float] = []
+        video_codecs: set[str] = set()
+        audio_codecs: set[str] = set()
+        has_video = False
+        has_audio = False
         for item in formats:
             if not isinstance(item, dict):
                 continue
             height = item.get("height")
             if isinstance(height, int) and 200 <= height <= 5000:
                 heights.append(height)
+            width = item.get("width")
+            if isinstance(width, int) and 200 <= width <= 10000:
+                widths.append(width)
             fps = item.get("fps")
             if isinstance(fps, (int, float)) and fps > 0:
                 fps_values.append(float(fps))
+            vcodec = str(item.get("vcodec") or "none")
+            acodec = str(item.get("acodec") or "none")
+            if vcodec != "none":
+                has_video = True
+                video_codecs.add(vcodec.split(".")[0])
+            if acodec != "none":
+                has_audio = True
+                audio_codecs.add(acodec.split(".")[0])
 
         estimated_size = self._estimate_size_for_selected_quality(formats)
         return {
+            "platform": detect_platform(url),
             "title": info.get("title") or "Unknown title",
+            "thumbnail": info.get("thumbnail"),
             "duration": info.get("duration"),
+            "max_width": max(widths) if widths else None,
             "max_height": max(heights) if heights else None,
             "max_fps": max(fps_values) if fps_values else None,
+            "has_video": has_video,
+            "has_audio": has_audio,
+            "video_codecs": ", ".join(sorted(video_codecs)) if video_codecs else "unknown",
+            "audio_codecs": ", ".join(sorted(audio_codecs)) if audio_codecs else "unknown",
             "estimated_size": estimated_size,
             "format_count": len(formats),
         }
@@ -977,21 +1044,51 @@ class StreamDownloaderApp(BaseTk):
 
     def _analysis_message(self, analysis: dict[str, object]) -> str:
         title = analysis.get("title") or "Unknown title"
+        platform_name = analysis.get("platform") or "Unknown"
+        max_width = analysis.get("max_width")
         max_height = analysis.get("max_height")
         max_fps = analysis.get("max_fps")
         estimated_size = analysis.get("estimated_size")
         duration = analysis.get("duration")
+        thumbnail = analysis.get("thumbnail")
         recommendation = self._recommended_quality_for_height(max_height if isinstance(max_height, int) else None)
         lines = [
             "Автоанализ видео:",
+            f"Платформа: {platform_name}",
             f"Название: {title}",
+            f"Resolution: {max_width}x{max_height}" if isinstance(max_width, int) and isinstance(max_height, int) else "Resolution: не удалось определить",
             f"Максимальное качество: {max_height}p" if max_height else "Максимальное качество: не удалось определить",
             f"FPS: {max_fps:g}" if isinstance(max_fps, float) else "FPS: не удалось определить",
+            f"Видео codec: {analysis.get('video_codecs')}",
+            f"Аудио codec: {analysis.get('audio_codecs')}",
+            "Видео: есть" if analysis.get("has_video") else "Видео: не найдено",
+            "Звук: есть" if analysis.get("has_audio") else "Звук: не найден",
             f"Примерный размер выбранного качества: {self._format_bytes(estimated_size)}" if isinstance(estimated_size, int) else "Примерный размер выбранного качества: не удалось определить",
             f"Длительность: {self._format_duration(duration)}" if isinstance(duration, (int, float)) else "Длительность: не удалось определить",
             f"Рекомендация: Quality = {recommendation}",
         ]
+        if isinstance(thumbnail, str) and thumbnail:
+            lines.append(f"Thumbnail: {thumbnail}")
         return "\n".join(lines)
+
+    def _preview_message(self, analysis: dict[str, object]) -> str:
+        max_width = analysis.get("max_width")
+        max_height = analysis.get("max_height")
+        size = analysis.get("estimated_size")
+        parts = [
+            f"Detected: {analysis.get('platform') or 'Unknown'}",
+            f"Title: {analysis.get('title') or 'Unknown'}",
+        ]
+        if isinstance(max_width, int) and isinstance(max_height, int):
+            parts.append(f"Quality: {max_width}x{max_height}")
+        if isinstance(analysis.get("max_fps"), float):
+            parts.append(f"FPS: {analysis['max_fps']:g}")
+        parts.append(f"Video: {'yes' if analysis.get('has_video') else 'no'}")
+        parts.append(f"Audio: {'yes' if analysis.get('has_audio') else 'no'}")
+        parts.append(f"Codecs: {analysis.get('video_codecs')} / {analysis.get('audio_codecs')}")
+        if isinstance(size, int):
+            parts.append(f"Selected size: {self._format_bytes(size)}")
+        return "\n".join(parts)
 
     @staticmethod
     def _format_bytes(value: object) -> str:
@@ -1138,6 +1235,7 @@ class StreamDownloaderApp(BaseTk):
             self.last_analysis_url = self.url_var.get().strip()
             size = analysis.get("estimated_size")
             self.last_analysis_size = size if isinstance(size, int) else None
+            self.preview_var.set(self._preview_message(analysis))
             self._append_log("\n" + self._analysis_message(analysis) + "\n")
         if max_height:
             self._append_log(f"Максимум найдено: {max_height}p\n")
