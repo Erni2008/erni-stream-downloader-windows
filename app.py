@@ -36,7 +36,7 @@ from downloader.utils import (
 
 
 APP_TITLE = "ERNI Stream Downloader"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 GITHUB_RELEASES = {
     "Darwin": "https://api.github.com/repos/Erni2008/erni-stream-downloader-macos/releases/latest",
     "Windows": "https://api.github.com/repos/Erni2008/erni-stream-downloader-windows/releases/latest",
@@ -76,6 +76,12 @@ I18N = {
         "update_app": "Обновить app",
         "check_file": "Проверить файл",
         "repair_file": "Починить видео",
+        "open_save": "Открыть папку",
+        "clear_log": "Очистить лог",
+        "smart_preset": "Smart preset",
+        "quick_modes": "Быстрые режимы",
+        "platform_waiting": "Platform: waiting for link",
+        "platform_detected": "Platform",
         "log": "Лог",
         "queue": "Очередь",
         "queue_subtitle": "Добавь несколько ссылок и скачивай их по очереди.",
@@ -129,6 +135,12 @@ I18N = {
         "update_app": "Update app",
         "check_file": "Check file",
         "repair_file": "Repair video",
+        "open_save": "Open folder",
+        "clear_log": "Clear log",
+        "smart_preset": "Smart preset",
+        "quick_modes": "Quick modes",
+        "platform_waiting": "Platform: waiting for link",
+        "platform_detected": "Platform",
         "log": "Log",
         "queue": "Queue",
         "queue_subtitle": "Add several links and download them one by one.",
@@ -212,6 +224,7 @@ class StreamDownloaderApp(BaseTk):
         self.percent_var = tk.StringVar(value="0%")
         self.tools_var = tk.StringVar(value="Checking tools...")
         self.preview_var = tk.StringVar(value="Preview will appear after analysis.")
+        self.platform_var = tk.StringVar(value=self.t("platform_waiting"))
         self.url_var.trace_add("write", self._on_url_changed)
 
         self._configure_style()
@@ -254,8 +267,10 @@ class StreamDownloaderApp(BaseTk):
             "line": "#d7dee8",
             "accent": "#1f6feb",
             "accent_dark": "#1957ba",
+            "accent_soft": "#e8f1ff",
             "danger": "#d92d20",
             "success": "#118c4f",
+            "success_soft": "#e8f8ef",
             "log_bg": "#0b1220",
             "log_fg": "#d8e7ff",
         }
@@ -393,28 +408,34 @@ class StreamDownloaderApp(BaseTk):
         ).grid(row=0, column=2, sticky="e")
         tk.Label(form, text=self.t("setup_subtitle"), bg=panel, fg=muted, font=("TkDefaultFont", 10)).grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 16))
 
+        platform_bar = tk.Frame(form, bg="#f8fbff", padx=12, pady=10, highlightthickness=1, highlightbackground="#dbeafe")
+        platform_bar.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(0, 10))
+        platform_bar.columnconfigure(1, weight=1)
+        tk.Label(platform_bar, textvariable=self.platform_var, bg="#f8fbff", fg="#185abc", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, sticky="w")
+        make_button(platform_bar, self.t("smart_preset"), self._apply_smart_preset, "secondary").grid(row=0, column=2, sticky="e")
+
         labels = [self.t("youtube_url"), self.t("save_folder"), self.t("quality"), self.t("format"), self.t("preset")]
-        for index, text in enumerate(labels, start=2):
+        for index, text in enumerate(labels, start=3):
             tk.Label(form, text=text, bg=panel, fg=ink, font=("TkDefaultFont", 10, "bold")).grid(row=index, column=0, sticky="w", pady=8)
 
-        make_entry(form, self.url_var).grid(row=2, column=1, sticky="ew", padx=12, pady=8, ipady=10)
-        make_button(form, self.t("paste"), self._paste_url).grid(row=2, column=2, sticky="ew", pady=8)
+        make_entry(form, self.url_var).grid(row=3, column=1, sticky="ew", padx=12, pady=8, ipady=10)
+        make_button(form, self.t("paste"), self._paste_url).grid(row=3, column=2, sticky="ew", pady=8)
 
-        make_entry(form, self.save_dir_var).grid(row=3, column=1, sticky="ew", padx=12, pady=8, ipady=10)
-        make_button(form, self.t("browse"), self._browse_directory).grid(row=3, column=2, sticky="ew", pady=8)
+        make_entry(form, self.save_dir_var).grid(row=4, column=1, sticky="ew", padx=12, pady=8, ipady=10)
+        make_button(form, self.t("browse"), self._browse_directory).grid(row=4, column=2, sticky="ew", pady=8)
 
         quality_box = ttk.Combobox(form, textvariable=self.quality_var, values=list(QUALITY_FORMATS.keys()), state="readonly")
-        quality_box.grid(row=4, column=1, sticky="ew", padx=12, pady=8, ipady=6)
-        make_button(form, self.t("analyze"), self._start_quality_check).grid(row=4, column=2, sticky="ew", pady=8)
+        quality_box.grid(row=5, column=1, sticky="ew", padx=12, pady=8, ipady=6)
+        make_button(form, self.t("analyze"), self._start_quality_check).grid(row=5, column=2, sticky="ew", pady=8)
 
         format_box = ttk.Combobox(form, textvariable=self.format_var, values=FORMATS, state="readonly")
-        format_box.grid(row=5, column=1, sticky="ew", padx=12, pady=8, ipady=6)
-        tk.Label(form, text=self.t("format_hint"), bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=5, column=2, sticky="w", padx=(0, 4))
+        format_box.grid(row=6, column=1, sticky="ew", padx=12, pady=8, ipady=6)
+        tk.Label(form, text=self.t("format_hint"), bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=6, column=2, sticky="w", padx=(0, 4))
 
         mode_box = ttk.Combobox(form, textvariable=self.mode_var, values=DOWNLOAD_MODES, state="readonly")
-        mode_box.grid(row=6, column=1, sticky="ew", padx=12, pady=8, ipady=6)
+        mode_box.grid(row=7, column=1, sticky="ew", padx=12, pady=8, ipady=6)
         mode_box.bind("<<ComboboxSelected>>", self._on_mode_changed)
-        tk.Label(form, text=self.t("preset_hint"), bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=6, column=2, sticky="w", padx=(0, 4))
+        tk.Label(form, text=self.t("preset_hint"), bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=7, column=2, sticky="w", padx=(0, 4))
         tk.Label(
             form,
             textvariable=self.mode_hint_var,
@@ -423,10 +444,18 @@ class StreamDownloaderApp(BaseTk):
             wraplength=690,
             justify="left",
             font=("TkDefaultFont", 9),
-        ).grid(row=7, column=1, columnspan=2, sticky="w", padx=12, pady=(0, 8))
+        ).grid(row=8, column=1, columnspan=2, sticky="w", padx=12, pady=(0, 8))
+
+        quick_row = tk.Frame(form, bg=panel)
+        quick_row.grid(row=9, column=1, columnspan=2, sticky="ew", padx=12, pady=(4, 10))
+        tk.Label(quick_row, text=self.t("quick_modes"), bg=panel, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        make_button(quick_row, "Original", lambda: self._set_mode("Original quality"), "ghost").grid(row=0, column=1, padx=(0, 6))
+        make_button(quick_row, "Universal", lambda: self._set_mode("For editing: universal"), "ghost").grid(row=0, column=2, padx=(0, 6))
+        make_button(quick_row, "Reels", lambda: self._set_mode("For TikTok / Reels / Shorts"), "ghost").grid(row=0, column=3, padx=(0, 6))
+        make_button(quick_row, "Audio", lambda: self._set_mode("Audio only"), "ghost").grid(row=0, column=4)
 
         option_box = tk.Frame(form, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
-        option_box.grid(row=8, column=1, columnspan=2, sticky="ew", padx=12, pady=(12, 4))
+        option_box.grid(row=10, column=1, columnspan=2, sticky="ew", padx=12, pady=(2, 4))
         tk.Checkbutton(
             option_box,
             text=self.t("temp_first"),
@@ -442,26 +471,29 @@ class StreamDownloaderApp(BaseTk):
         tk.Label(option_box, text=self.t("temp_hint"), bg=soft, fg=muted, font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         action_row = tk.Frame(form, bg=panel)
-        action_row.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(18, 0))
-        action_row.columnconfigure(8, weight=1)
+        action_row.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(18, 0))
+        for column in range(6):
+            action_row.columnconfigure(column, weight=1)
         self.download_button = make_button(action_row, self.t("download"), self._start_download, "primary")
-        self.download_button.grid(row=0, column=0, padx=(0, 8))
+        self.download_button.grid(row=0, column=0, sticky="ew", padx=(0, 8), pady=(0, 8))
         self.check_quality_button = make_button(action_row, self.t("analyze_video"), self._start_quality_check)
-        self.check_quality_button.grid(row=0, column=1, padx=(0, 8))
+        self.check_quality_button.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=(0, 8))
         self.cancel_button = make_button(action_row, self.t("cancel"), self._cancel_download, "danger", state="disabled")
-        self.cancel_button.grid(row=0, column=2, padx=(0, 8))
+        self.cancel_button.grid(row=0, column=2, sticky="ew", padx=(0, 8), pady=(0, 8))
         self.open_folder_button = make_button(action_row, self.t("folder"), self._open_output_folder, state="disabled")
-        self.open_folder_button.grid(row=0, column=3, padx=(0, 8))
-        self.update_ytdlp_button = make_button(action_row, self.t("update_ytdlp"), self._start_update_ytdlp)
-        self.update_ytdlp_button.grid(row=0, column=4, padx=(0, 8))
-        self.check_update_button = make_button(action_row, self.t("update_app"), self._start_app_update_check)
-        self.check_update_button.grid(row=0, column=5, padx=(0, 8))
+        self.open_folder_button.grid(row=0, column=3, sticky="ew", padx=(0, 8), pady=(0, 8))
+        make_button(action_row, self.t("open_save"), self._open_save_folder, "secondary").grid(row=0, column=4, sticky="ew", padx=(0, 8), pady=(0, 8))
         self.probe_file_button = make_button(action_row, self.t("check_file"), self._select_and_probe_file)
-        self.probe_file_button.grid(row=0, column=6, padx=(0, 8))
+        self.probe_file_button.grid(row=0, column=5, sticky="ew", pady=(0, 8))
         self.repair_file_button = make_button(action_row, self.t("repair_file"), self._select_and_repair_file)
-        self.repair_file_button.grid(row=0, column=7, padx=(0, 8))
+        self.repair_file_button.grid(row=1, column=0, sticky="ew", padx=(0, 8))
+        self.update_ytdlp_button = make_button(action_row, self.t("update_ytdlp"), self._start_update_ytdlp)
+        self.update_ytdlp_button.grid(row=1, column=1, sticky="ew", padx=(0, 8))
+        self.check_update_button = make_button(action_row, self.t("update_app"), self._start_app_update_check)
+        self.check_update_button.grid(row=1, column=2, sticky="ew", padx=(0, 8))
+        make_button(action_row, self.t("clear_log"), self._clear_log, "ghost").grid(row=1, column=3, sticky="ew", padx=(0, 8))
         self.open_log_button = make_button(action_row, self.t("log"), self._open_log_folder, "ghost")
-        self.open_log_button.grid(row=0, column=8, sticky="e")
+        self.open_log_button.grid(row=1, column=4, sticky="ew", padx=(0, 8))
 
         side = tk.Frame(main, bg=panel, padx=18, pady=18, highlightthickness=1, highlightbackground="#e1e8f2")
         side.grid(row=0, column=1, sticky="nsew")
@@ -593,10 +625,40 @@ class StreamDownloaderApp(BaseTk):
         url = self.url_var.get().strip()
         if not url:
             self.preview_var.set("Preview will appear after analysis.")
+            self.platform_var.set(self.t("platform_waiting"))
             return
         platform_name = detect_platform(url)
         if platform_name != "Unknown":
+            self.platform_var.set(f"{self.t('platform_detected')}: {platform_name}")
             self.preview_var.set(f"Detected: {platform_name}\nClick Analyze to load title, quality, FPS, codecs and size.")
+        else:
+            self.platform_var.set("Platform: unsupported or unknown")
+
+    def _set_mode(self, mode: str) -> None:
+        if mode not in DOWNLOAD_MODES:
+            return
+        self.mode_var.set(mode)
+        self._on_mode_changed()
+        if mode == "Original quality":
+            self.format_var.set("MKV")
+        else:
+            self.format_var.set("MP4")
+        if mode in {"Original quality", "Best quality MP4", "For TikTok / Reels / Shorts", "For archive"}:
+            self.quality_var.set("Best available")
+
+    def _apply_smart_preset(self) -> None:
+        platform_name = detect_platform(self.url_var.get().strip())
+        if platform_name in {"TikTok", "Instagram Reels", "Instagram Post", "YouTube Shorts"}:
+            self._set_mode("For TikTok / Reels / Shorts")
+        elif platform_name in {"Twitch VOD", "Twitch Clip"}:
+            self._set_mode("Best quality MP4")
+        elif platform_name in {"Vimeo", "Facebook", "X / Twitter", "Reddit", "VK", "OK"}:
+            self._set_mode("Original quality")
+        elif platform_name.startswith("YouTube"):
+            self._set_mode("For editing: universal")
+        else:
+            self._set_mode("Best quality MP4")
+        self._append_log(f"Smart preset: {platform_name or 'Unknown'} -> {self.mode_var.get()}\n")
 
     def _enable_drag_and_drop(self, root: tk.Widget) -> None:
         if not DND_TEXT:
@@ -1457,6 +1519,11 @@ class StreamDownloaderApp(BaseTk):
             open_folder(self.last_output_file.parent)
         elif self.save_dir_var.get().strip():
             open_folder(Path(self.save_dir_var.get().strip()))
+
+    def _open_save_folder(self) -> None:
+        path = Path(self.save_dir_var.get().strip()).expanduser() if self.save_dir_var.get().strip() else Path.home()
+        path.mkdir(parents=True, exist_ok=True)
+        open_folder(path)
 
     def _open_log_folder(self) -> None:
         open_folder(self.log_file.parent)
