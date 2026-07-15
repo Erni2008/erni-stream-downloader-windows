@@ -4,16 +4,21 @@ Set-Location $PSScriptRoot
 
 $pythonExe = $null
 $pythonArgs = @()
-try {
-  py -3 --version | Out-Null
-  $pythonExe = "py"
-  $pythonArgs = @("-3")
-} catch {
+$venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+if (Test-Path $venvPython) {
+  $pythonExe = $venvPython
+} else {
   try {
-    python --version | Out-Null
-    $pythonExe = "python"
+    py -3 --version | Out-Null
+    $pythonExe = "py"
+    $pythonArgs = @("-3")
   } catch {
-    throw "Python was not found. Install Python 3.11+ and enable 'Add python.exe to PATH'."
+    try {
+      python --version | Out-Null
+      $pythonExe = "python"
+    } catch {
+      throw "Python was not found. Install Python 3.11+ and enable 'Add python.exe to PATH'."
+    }
   }
 }
 
@@ -55,6 +60,20 @@ if (!(Test-Path $ffmpegExe) -or !(Test-Path $ffprobeExe)) {
   Copy-Item $foundFfprobe.FullName $ffprobeExe
 }
 
+$extraBinaryArgs = @()
+$nodeExe = Get-Command "node.exe" -ErrorAction SilentlyContinue
+if (!$nodeExe) {
+  $wingetPackages = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+  if (Test-Path $wingetPackages) {
+    $nodeExe = Get-ChildItem -Path $wingetPackages -Filter "node.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+  }
+}
+if ($nodeExe) {
+  $nodePath = if ($nodeExe.Source) { $nodeExe.Source } else { $nodeExe.FullName }
+  Write-Host "Bundling Node.js runtime for yt-dlp JavaScript extraction: $nodePath"
+  $extraBinaryArgs += @("--add-binary", "$nodePath;.")
+}
+
 & $pythonExe @pythonArgs -m PyInstaller `
   --noconfirm `
   --clean `
@@ -65,6 +84,7 @@ if (!(Test-Path $ffmpegExe) -or !(Test-Path $ffprobeExe)) {
   --add-binary "$ytDlpExe;." `
   --add-binary "$ffmpegExe;." `
   --add-binary "$ffprobeExe;." `
+  @extraBinaryArgs `
   app.py
 
 Write-Host "Built: dist\\ERNI Stream Downloader.exe"

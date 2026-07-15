@@ -13,13 +13,20 @@ CONFIG_FILE_NAME = "config.json"
 @dataclass
 class AppConfig:
     save_directory: str = ""
-    quality: str = "1440p / 2K"
+    quality: str = "Best available"
     output_format: str = "MP4"
     download_mode: str = "For editing: universal"
+    download_scope: str = "full"
+    clip_start: str = ""
+    clip_end: str = ""
     language: str = "RU"
     use_temp_first: bool = True
     allow_playlist: bool = False
     playlist_limit: int = 10
+    rf_network_profile: bool = True
+    stable_network_mode: bool = True
+    proxy_url: str = ""
+    cookies_browser: str = "Off"
 
 
 def get_config_dir() -> Path:

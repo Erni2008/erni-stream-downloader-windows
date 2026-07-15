@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import subprocess
+import sys
 import threading
 import tkinter as tk
 import urllib.request
@@ -14,6 +15,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 try:
+    if getattr(sys, "frozen", False):
+        raise RuntimeError("tkinterdnd2 is disabled in packaged builds")
     from tkinterdnd2 import DND_TEXT, TkinterDnD
 except Exception:  # Drag-and-drop stays optional.
     DND_TEXT = None
@@ -112,6 +115,13 @@ I18N = {
         "playlist_mode": "Скачивать плейлист / профиль",
         "playlist_hint": "Используй только для публичных видео, на которые у тебя есть право. Чтобы случайно не скачать слишком много, есть лимит.",
         "playlist_limit": "Лимит видео",
+        "tab_full": "Видео целиком",
+        "tab_fragment": "Только фрагмент",
+        "full_video_hint": "Скачает всё видео или стрим целиком.",
+        "clip_start": "Начало фрагмента",
+        "clip_end": "Конец фрагмента",
+        "clip_hint": "Формат времени: 90, 01:30 или 00:01:30. Можно указать только начало или только конец.",
+        "clip_required": "Во вкладке фрагмента укажи начало или конец. Иначе это будет полное видео.",
         "pause_queue": "Пауза после текущего",
         "resume_queue": "Продолжить очередь",
         "result": "Результат файла",
@@ -184,6 +194,13 @@ I18N = {
         "playlist_mode": "Download playlist / profile",
         "playlist_hint": "Use only for public videos you own or have permission for. A limit prevents accidental bulk downloads.",
         "playlist_limit": "Video limit",
+        "tab_full": "Full video",
+        "tab_fragment": "Fragment only",
+        "full_video_hint": "Downloads the whole video or stream.",
+        "clip_start": "Clip start",
+        "clip_end": "Clip end",
+        "clip_hint": "Time format: 90, 01:30, or 00:01:30. You can set only start or only end.",
+        "clip_required": "In the fragment tab, set a start or end time. Otherwise it is a full video.",
         "pause_queue": "Pause after current",
         "resume_queue": "Resume queue",
         "result": "File result",
@@ -230,7 +247,7 @@ class StreamDownloaderApp(BaseTk):
 
         self.url_var = tk.StringVar()
         self.save_dir_var = tk.StringVar(value=self.config_data.save_directory)
-        self.quality_var = tk.StringVar(value=self.config_data.quality)
+        self.quality_var = tk.StringVar(value="Best available")
         self.format_var = tk.StringVar(value=self.config_data.output_format)
         initial_mode = self.config_data.download_mode
         if initial_mode not in DOWNLOAD_MODES:
@@ -245,10 +262,21 @@ class StreamDownloaderApp(BaseTk):
             initial_mode = legacy_modes.get(initial_mode, "For editing: universal")
         self.mode_var = tk.StringVar(value=initial_mode)
         self.mode_hint_var = tk.StringVar(value=DOWNLOAD_MODE_DESCRIPTIONS.get(initial_mode, ""))
+        initial_scope = self.config_data.download_scope if self.config_data.download_scope in {"full", "fragment"} else "full"
+        if self.config_data.clip_start or self.config_data.clip_end:
+            initial_scope = "fragment"
+        self.download_scope_var = tk.StringVar(value=initial_scope)
+        self.clip_start_var = tk.StringVar(value=self.config_data.clip_start)
+        self.clip_end_var = tk.StringVar(value=self.config_data.clip_end)
         self.language_var = tk.StringVar(value=self.config_data.language if self.config_data.language in I18N else "RU")
         self.temp_first_var = tk.BooleanVar(value=self.config_data.use_temp_first)
         self.allow_playlist_var = tk.BooleanVar(value=self.config_data.allow_playlist)
         self.playlist_limit_var = tk.IntVar(value=max(1, min(int(self.config_data.playlist_limit or 10), 200)))
+        self.rf_network_var = tk.BooleanVar(value=bool(self.config_data.rf_network_profile))
+        self.stable_network_var = tk.BooleanVar(value=bool(self.config_data.stable_network_mode))
+        self.proxy_url_var = tk.StringVar(value=self.config_data.proxy_url)
+        initial_cookies_browser = self.config_data.cookies_browser if self.config_data.cookies_browser in {"Off", "Edge", "Chrome", "Firefox"} else "Off"
+        self.cookies_browser_var = tk.StringVar(value=initial_cookies_browser)
         self.status_key = "Idle"
         self.status_var = tk.StringVar(value=self._status_label("Idle"))
         self.percent_var = tk.StringVar(value="0%")
@@ -465,7 +493,7 @@ class StreamDownloaderApp(BaseTk):
         make_entry(form, self.save_dir_var).grid(row=4, column=1, sticky="ew", padx=12, pady=8, ipady=10)
         make_button(form, self.t("browse"), self._browse_directory).grid(row=4, column=2, sticky="ew", pady=8)
 
-        quality_box = ttk.Combobox(form, textvariable=self.quality_var, values=list(QUALITY_FORMATS.keys()), state="readonly")
+        quality_box = ttk.Combobox(form, textvariable=self.quality_var, values=["Best available"], state="disabled")
         quality_box.grid(row=5, column=1, sticky="ew", padx=12, pady=8, ipady=6)
         make_button(form, self.t("analyze"), self._start_quality_check).grid(row=5, column=2, sticky="ew", pady=8)
 
@@ -487,16 +515,43 @@ class StreamDownloaderApp(BaseTk):
             font=("TkDefaultFont", 9),
         ).grid(row=8, column=1, columnspan=2, sticky="w", padx=12, pady=(0, 8))
 
+        scope_tabs = ttk.Notebook(form)
+        scope_tabs.grid(row=9, column=0, columnspan=3, sticky="ew", padx=12, pady=(4, 10))
+        self.scope_tabs = scope_tabs
+
+        full_tab = tk.Frame(scope_tabs, bg=panel, padx=12, pady=12)
+        fragment_tab = tk.Frame(scope_tabs, bg=panel, padx=12, pady=12)
+        scope_tabs.add(full_tab, text=self.t("tab_full"))
+        scope_tabs.add(fragment_tab, text=self.t("tab_fragment"))
+
+        tk.Label(
+            full_tab,
+            text=self.t("full_video_hint"),
+            bg=panel,
+            fg=muted,
+            font=("TkDefaultFont", 10, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+
+        fragment_tab.columnconfigure((1, 3), weight=1)
+        tk.Label(fragment_tab, text=self.t("clip_start"), bg=panel, fg=ink, font=("TkDefaultFont", 10, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        make_entry(fragment_tab, self.clip_start_var).grid(row=0, column=1, sticky="ew", ipady=8, padx=(0, 12))
+        tk.Label(fragment_tab, text=self.t("clip_end"), bg=panel, fg=ink, font=("TkDefaultFont", 10, "bold")).grid(row=0, column=2, sticky="w", padx=(0, 8))
+        make_entry(fragment_tab, self.clip_end_var).grid(row=0, column=3, sticky="ew", ipady=8)
+        tk.Label(fragment_tab, text=self.t("clip_hint"), bg=panel, fg=muted, font=("TkDefaultFont", 9)).grid(row=1, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        scope_tabs.select(fragment_tab if self.download_scope_var.get() == "fragment" else full_tab)
+        scope_tabs.bind("<<NotebookTabChanged>>", self._on_scope_tab_changed)
+
         quick_row = tk.Frame(form, bg=panel)
-        quick_row.grid(row=9, column=1, columnspan=2, sticky="ew", padx=12, pady=(4, 10))
+        quick_row.grid(row=10, column=1, columnspan=2, sticky="ew", padx=12, pady=(4, 10))
         tk.Label(quick_row, text=self.t("quick_modes"), bg=panel, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 8))
         make_button(quick_row, "Original", lambda: self._set_mode("Original quality"), "ghost").grid(row=0, column=1, padx=(0, 6))
         make_button(quick_row, "Universal", lambda: self._set_mode("For editing: universal"), "ghost").grid(row=0, column=2, padx=(0, 6))
-        make_button(quick_row, "Reels", lambda: self._set_mode("For TikTok / Reels / Shorts"), "ghost").grid(row=0, column=3, padx=(0, 6))
-        make_button(quick_row, "Audio", lambda: self._set_mode("Audio only"), "ghost").grid(row=0, column=4)
+        make_button(quick_row, "VEGAS", lambda: self._set_mode("For editing: VEGAS Pro"), "ghost").grid(row=0, column=3, padx=(0, 6))
+        make_button(quick_row, "Reels", lambda: self._set_mode("For TikTok / Reels / Shorts"), "ghost").grid(row=0, column=4, padx=(0, 6))
+        make_button(quick_row, "Audio", lambda: self._set_mode("Audio only"), "ghost").grid(row=0, column=5)
 
         option_box = tk.Frame(form, bg=soft, padx=14, pady=12, highlightthickness=1, highlightbackground="#e8eef7")
-        option_box.grid(row=10, column=1, columnspan=2, sticky="ew", padx=12, pady=(2, 4))
+        option_box.grid(row=11, column=1, columnspan=2, sticky="ew", padx=12, pady=(2, 4))
         option_box.columnconfigure(0, weight=1)
         tk.Checkbutton(
             option_box,
@@ -511,6 +566,53 @@ class StreamDownloaderApp(BaseTk):
             bd=0,
         ).grid(row=0, column=0, sticky="w")
         tk.Label(option_box, text=self.t("temp_hint"), bg=soft, fg=muted, font=("TkDefaultFont", 9)).grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+        network_box = tk.Frame(option_box, bg=soft)
+        network_box.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        network_box.columnconfigure(1, weight=1)
+        tk.Checkbutton(
+            network_box,
+            text="Russia / RF network profile",
+            variable=self.rf_network_var,
+            bg=soft,
+            fg=ink,
+            activebackground=soft,
+            selectcolor="#ffffff",
+            font=("TkDefaultFont", 10, "bold"),
+            relief="flat",
+            bd=0,
+        ).grid(row=0, column=0, columnspan=4, sticky="w")
+        tk.Checkbutton(
+            network_box,
+            text="VPN / Proxy stable mode",
+            variable=self.stable_network_var,
+            bg=soft,
+            fg=ink,
+            activebackground=soft,
+            selectcolor="#ffffff",
+            font=("TkDefaultFont", 10, "bold"),
+            relief="flat",
+            bd=0,
+        ).grid(row=1, column=0, columnspan=4, sticky="w")
+        tk.Label(
+            network_box,
+            text="RF mode: auto-detects local proxy, forces IPv4, resumes segments, and waits for VPN recovery.",
+            bg=soft,
+            fg=muted,
+            font=("TkDefaultFont", 9),
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(3, 6))
+        tk.Label(network_box, text="Proxy", bg=soft, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=3, column=0, sticky="w", padx=(0, 8))
+        make_entry(network_box, self.proxy_url_var).grid(row=3, column=1, sticky="ew", ipady=6)
+        tk.Label(network_box, text="auto if empty; socks5h://127.0.0.1:1080 or http://127.0.0.1:7890", bg=soft, fg=muted, font=("TkDefaultFont", 8)).grid(row=4, column=1, sticky="w", pady=(3, 0))
+        tk.Label(network_box, text="Cookies", bg=soft, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=3, column=2, sticky="e", padx=(10, 8))
+        ttk.Combobox(
+            network_box,
+            textvariable=self.cookies_browser_var,
+            values=["Off", "Edge", "Chrome", "Firefox"],
+            state="readonly",
+            width=9,
+        ).grid(row=3, column=3, sticky="e")
+
         tk.Checkbutton(
             option_box,
             text=self.t("playlist_mode"),
@@ -522,9 +624,9 @@ class StreamDownloaderApp(BaseTk):
             font=("TkDefaultFont", 10, "bold"),
             relief="flat",
             bd=0,
-        ).grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=3, column=0, sticky="w", pady=(10, 0))
         playlist_controls = tk.Frame(option_box, bg=soft)
-        playlist_controls.grid(row=3, column=0, sticky="ew", pady=(4, 0))
+        playlist_controls.grid(row=4, column=0, sticky="ew", pady=(4, 0))
         tk.Label(playlist_controls, text=self.t("playlist_limit"), bg=soft, fg=muted, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, sticky="w")
         tk.Spinbox(
             playlist_controls,
@@ -538,10 +640,10 @@ class StreamDownloaderApp(BaseTk):
             highlightthickness=1,
             highlightbackground="#d9e2ef",
         ).grid(row=0, column=1, sticky="w", padx=(8, 0))
-        tk.Label(option_box, text=self.t("playlist_hint"), bg=soft, fg=muted, wraplength=690, justify="left", font=("TkDefaultFont", 9)).grid(row=4, column=0, sticky="w", pady=(4, 0))
+        tk.Label(option_box, text=self.t("playlist_hint"), bg=soft, fg=muted, wraplength=690, justify="left", font=("TkDefaultFont", 9)).grid(row=5, column=0, sticky="w", pady=(4, 0))
 
         action_row = tk.Frame(form, bg=panel)
-        action_row.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(18, 0))
+        action_row.grid(row=12, column=0, columnspan=3, sticky="ew", pady=(18, 0))
         for column in range(4):
             action_row.columnconfigure(column, weight=1)
         self.download_button = make_button(action_row, self.t("download"), self._start_download, "primary")
@@ -739,6 +841,20 @@ class StreamDownloaderApp(BaseTk):
         self._build_ui()
         self._append_log(f"{self.t('language')}: {self.language_var.get()}\n")
 
+    def _on_scope_tab_changed(self, _event: object | None = None) -> None:
+        if not hasattr(self, "scope_tabs"):
+            return
+        selected_index = self.scope_tabs.index(self.scope_tabs.select())
+        self.download_scope_var.set("fragment" if selected_index == 1 else "full")
+
+    def _is_fragment_mode(self) -> bool:
+        return self.download_scope_var.get() == "fragment"
+
+    def _selected_clip_times(self) -> tuple[str, str]:
+        if not self._is_fragment_mode():
+            return "", ""
+        return self.clip_start_var.get().strip(), self.clip_end_var.get().strip()
+
     def _on_url_changed(self, *_args: object) -> None:
         url = self.url_var.get().strip()
         if not url:
@@ -813,7 +929,7 @@ class StreamDownloaderApp(BaseTk):
         for url in urls:
             if url not in self.queue_urls:
                 self.queue_urls.append(url)
-                self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
+                self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self._effective_quality(), size="—", progress="0%")
                 added += 1
         self._append_log(f"{self.t('drop_added')}: {added}\n")
 
@@ -849,7 +965,7 @@ class StreamDownloaderApp(BaseTk):
         for url in urls:
             if url not in self.queue_urls:
                 self.queue_urls.append(url)
-                self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
+                self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self._effective_quality(), size="—", progress="0%")
                 added += 1
         if len(urls) > 1:
             self._append_log(f"Paste: добавлено ссылок в очередь: {added}\n")
@@ -873,7 +989,7 @@ class StreamDownloaderApp(BaseTk):
             messagebox.showinfo(self.t("queue"), "Эта ссылка уже есть в очереди.")
             return
         self.queue_urls.append(url)
-        self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
+        self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self._effective_quality(), size="—", progress="0%")
         self.url_var.set("")
 
     def _remove_selected_queue_item(self) -> None:
@@ -901,7 +1017,7 @@ class StreamDownloaderApp(BaseTk):
             if url not in self.queue_urls:
                 self.queue_urls.append(url)
                 added += 1
-            self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает повтор", quality=self.quality_var.get(), size="—", progress="0%")
+            self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает повтор", quality=self._effective_quality(), size="—", progress="0%")
         self.failed_urls.clear()
         self._append_log(f"\nДобавлено для повтора: {added}\n")
 
@@ -921,7 +1037,7 @@ class StreamDownloaderApp(BaseTk):
                 "",
                 "end",
                 text=label,
-                values=(platform or detect_platform(url), status or "Ожидает", quality or self.quality_var.get(), size or "—", progress or "0%"),
+                values=(platform or detect_platform(url), status or "Ожидает", quality or self._effective_quality(), size or "—", progress or "0%"),
             )
             self.queue_row_ids[url] = row_id
             return
@@ -968,15 +1084,17 @@ class StreamDownloaderApp(BaseTk):
         for url in urls:
             if url not in self.queue_urls:
                 self.queue_urls.append(url)
-            self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self.quality_var.get(), size="—", progress="0%")
+            self._queue_insert_or_update(url, platform=detect_platform(url), status="Ожидает", quality=self._effective_quality(), size="—", progress="0%")
         self._clear_log()
         self._write_log_file(
             f"\n=== {APP_TITLE} {APP_VERSION} session {datetime.now().isoformat(timespec='seconds')} ===\n"
             f"Queue size: {len(self.pending_urls)}\n"
             f"Save directory: {Path(self.save_dir_var.get().strip()).expanduser()}\n"
-            f"Quality: {self.quality_var.get()}\n"
+            f"Quality: {self._effective_quality()}\n"
             f"Format: {self.format_var.get()}\n"
             f"Mode: {self.mode_var.get()}\n"
+            f"Scope: {self.download_scope_var.get()}\n"
+            f"Clip: {(self._selected_clip_times()[0] or 'start') + ' - ' + (self._selected_clip_times()[1] or 'end') if self._is_fragment_mode() else 'disabled'}\n"
             f"Temp first: {self.temp_first_var.get()}\n\n"
             f"Playlist/profile mode: {self.allow_playlist_var.get()}\n"
             f"Playlist limit: {self._playlist_limit()}\n\n"
@@ -1008,6 +1126,9 @@ class StreamDownloaderApp(BaseTk):
             return None
         if save_directory.exists() and not save_directory.is_dir():
             messagebox.showerror("Folder error", f"This path is not a folder:\n{save_directory}")
+            return None
+
+        if not self._validate_clip_times():
             return None
 
         ok, missing = check_dependencies()
@@ -1067,13 +1188,13 @@ class StreamDownloaderApp(BaseTk):
         self.last_output_file = None
         self.open_folder_button.configure(state="disabled")
         self._set_status("Analyzing")
-        self._queue_insert_or_update(url, status=self.t("analyze"), quality=self.quality_var.get(), progress="0%")
+        self._queue_insert_or_update(url, status=self.t("analyze"), quality=self._effective_quality(), progress="0%")
         self._append_log(f"\n--- Новая загрузка ---\nURL: {url}\n")
         self._append_log(f"Detected: {detect_platform(url)}\n")
-        analysis = self._analyze_video_sync(url)
+        analysis = None
         estimated_size = None
         if analysis:
-            estimated_size = analysis.get("estimated_size")
+            estimated_size = self._estimated_size_for_current_clip(analysis)
             self.last_analysis_url = url
             self.last_analysis_size = estimated_size
             self._queue_insert_or_update(
@@ -1086,16 +1207,31 @@ class StreamDownloaderApp(BaseTk):
         else:
             self._append_log("Автоанализ не удался. Продолжаю без точной оценки размера.\n")
 
+        if self.stable_network_var.get():
+            self._append_log("Network: VPN/Proxy stable mode enabled.\n")
+        if self.rf_network_var.get():
+            self._append_log("Network: Russia/RF profile enabled: auto proxy, IPv4, resilient ranges.\n")
+        if self.proxy_url_var.get().strip():
+            self._append_log("Network: explicit proxy enabled.\n")
+        if self.cookies_browser_var.get() != "Off":
+            self._append_log(f"Network: using cookies from {self.cookies_browser_var.get()}.\n")
+
         request = DownloadRequest(
             url=url,
             save_directory=save_directory,
-            quality=self.quality_var.get(),
+            quality=self._effective_quality(),
             output_format=self.format_var.get(),
             download_mode=self.mode_var.get(),
             use_temp_first=self.temp_first_var.get(),
+            clip_start=self._selected_clip_times()[0],
+            clip_end=self._selected_clip_times()[1],
             estimated_size=estimated_size,
             allow_playlist=self.allow_playlist_var.get(),
             playlist_limit=self._playlist_limit(),
+            rf_network_profile=self.rf_network_var.get(),
+            stable_network_mode=self.stable_network_var.get(),
+            proxy_url=self.proxy_url_var.get().strip(),
+            cookies_browser=self.cookies_browser_var.get(),
         )
 
         self.worker = DownloadWorker(
@@ -1136,6 +1272,72 @@ class StreamDownloaderApp(BaseTk):
         except (tk.TclError, ValueError):
             value = 10
         return max(1, min(value, 200))
+
+    @staticmethod
+    def _effective_quality() -> str:
+        return "Best available"
+
+    def _validate_clip_times(self) -> bool:
+        if not self._is_fragment_mode():
+            return True
+        start, end = self._selected_clip_times()
+        if not start and not end:
+            messagebox.showwarning(self.t("tab_fragment"), self.t("clip_required"))
+            return False
+        if start and not self._is_valid_time_value(start):
+            messagebox.showwarning(self.t("clip_start"), self.t("clip_hint"))
+            return False
+        if end and not self._is_valid_time_value(end):
+            messagebox.showwarning(self.t("clip_end"), self.t("clip_hint"))
+            return False
+        if start and end and self._time_to_seconds(start) >= self._time_to_seconds(end):
+            messagebox.showwarning(self.t("clip_end"), "Clip end must be later than clip start.")
+            return False
+        return True
+
+    @staticmethod
+    def _is_valid_time_value(value: str) -> bool:
+        return bool(re.fullmatch(r"\d+(?:\.\d+)?|(?:\d{1,2}:)?\d{1,2}:\d{2}(?:\.\d+)?", value.strip()))
+
+    @staticmethod
+    def _time_to_seconds(value: str) -> float:
+        value = value.strip()
+        if ":" not in value:
+            return float(value)
+        parts = [float(part) for part in value.split(":")]
+        seconds = 0.0
+        for part in parts:
+            seconds = seconds * 60 + part
+        return seconds
+
+    def _clip_duration_seconds(self, full_duration: object) -> float | None:
+        if not self._is_fragment_mode():
+            return None
+        start, end = self._selected_clip_times()
+        if not start and not end:
+            return None
+        if not isinstance(full_duration, (int, float)) or full_duration <= 0:
+            return None
+        start_seconds = self._time_to_seconds(start) if start else 0.0
+        end_seconds = self._time_to_seconds(end) if end else float(full_duration)
+        end_seconds = min(end_seconds, float(full_duration))
+        if end_seconds <= start_seconds:
+            return None
+        return end_seconds - start_seconds
+
+    def _estimated_size_for_current_clip(self, analysis: dict[str, object]) -> int | None:
+        full_size = analysis.get("estimated_size")
+        if not isinstance(full_size, int) or full_size <= 0:
+            return None
+        clip_duration = self._clip_duration_seconds(analysis.get("duration"))
+        if clip_duration is None:
+            return full_size
+        full_duration = analysis.get("duration")
+        if not isinstance(full_duration, (int, float)) or full_duration <= 0:
+            return full_size
+        ratio = min(1.0, max(0.001, clip_duration / float(full_duration)))
+        # Keep a practical minimum so ffmpeg has room for headers, audio, and bitrate spikes.
+        return max(50 * 1024 * 1024, int(full_size * ratio * 1.25))
 
     def _start_quality_check(self) -> None:
         url = self.url_var.get().strip()
@@ -1275,7 +1477,7 @@ class StreamDownloaderApp(BaseTk):
         }
 
     def _estimate_size_for_selected_quality(self, formats: list[object]) -> int | None:
-        height_limit = self._height_limit_for_quality(self.quality_var.get())
+        height_limit = self._height_limit_for_quality(self._effective_quality())
         video_sizes: list[int] = []
         audio_sizes: list[int] = []
         fallback_sizes: list[int] = []
@@ -1307,12 +1509,18 @@ class StreamDownloaderApp(BaseTk):
 
     @staticmethod
     def _height_limit_for_quality(quality: str) -> int | None:
+        if "2160" in quality:
+            return 2160
         if "1440" in quality:
             return 1440
         if "1080" in quality:
             return 1080
         if "720" in quality:
             return 720
+        if "480" in quality:
+            return 480
+        if "360" in quality:
+            return 360
         return None
 
     def _analysis_message(self, analysis: dict[str, object]) -> str:
@@ -1322,6 +1530,7 @@ class StreamDownloaderApp(BaseTk):
         max_height = analysis.get("max_height")
         max_fps = analysis.get("max_fps")
         estimated_size = analysis.get("estimated_size")
+        shown_size = self._estimated_size_for_current_clip(analysis)
         duration = analysis.get("duration")
         thumbnail = analysis.get("thumbnail")
         recommendation = self._recommended_quality_for_height(max_height if isinstance(max_height, int) else None)
@@ -1337,17 +1546,19 @@ class StreamDownloaderApp(BaseTk):
             "Видео: есть" if analysis.get("has_video") else "Видео: не найдено",
             "Звук: есть" if analysis.get("has_audio") else "Звук: не найден",
             f"Примерный размер выбранного качества: {self._format_bytes(estimated_size)}" if isinstance(estimated_size, int) else "Примерный размер выбранного качества: не удалось определить",
+            f"Примерный размер фрагмента: {self._format_bytes(shown_size)}" if isinstance(shown_size, int) and shown_size != estimated_size else "",
             f"Длительность: {self._format_duration(duration)}" if isinstance(duration, (int, float)) else "Длительность: не удалось определить",
             f"Рекомендация: Quality = {recommendation}",
         ]
         if isinstance(thumbnail, str) and thumbnail:
             lines.append(f"Thumbnail: {thumbnail}")
-        return "\n".join(lines)
+        return "\n".join(line for line in lines if line)
 
     def _preview_message(self, analysis: dict[str, object]) -> str:
         max_width = analysis.get("max_width")
         max_height = analysis.get("max_height")
         size = analysis.get("estimated_size")
+        shown_size = self._estimated_size_for_current_clip(analysis)
         parts = [
             f"Detected: {analysis.get('platform') or 'Unknown'}",
             f"Title: {analysis.get('title') or 'Unknown'}",
@@ -1359,8 +1570,9 @@ class StreamDownloaderApp(BaseTk):
         parts.append(f"Video: {'yes' if analysis.get('has_video') else 'no'}")
         parts.append(f"Audio: {'yes' if analysis.get('has_audio') else 'no'}")
         parts.append(f"Codecs: {analysis.get('video_codecs')} / {analysis.get('audio_codecs')}")
-        if isinstance(size, int):
-            parts.append(f"Selected size: {self._format_bytes(size)}")
+        if isinstance(shown_size, int):
+            label = "Clip size" if shown_size != size else "Selected size"
+            parts.append(f"{label}: {self._format_bytes(shown_size)}")
         return "\n".join(parts)
 
     @staticmethod
@@ -1415,14 +1627,18 @@ class StreamDownloaderApp(BaseTk):
     def _recommended_quality_for_height(height: int | None) -> str:
         if not height:
             return "Best available"
-        if height > 1440:
-            return "Best available"
+        if height >= 2160:
+            return "2160p / 4K"
         if height == 1440:
             return "1440p / 2K"
         if height >= 1080:
             return "1080p"
         if height >= 720:
             return "720p"
+        if height >= 480:
+            return "480p"
+        if height >= 360:
+            return "360p"
         return "Best available"
 
     def _cancel_download(self) -> None:
@@ -1461,24 +1677,39 @@ class StreamDownloaderApp(BaseTk):
         self.event_queue.put(("update_ytdlp_result", (True, f"yt-dlp обновлён внутри приложения:\n{target}")))
 
     def _process_events(self) -> None:
+        processed = 0
+        pending_log: list[str] = []
+        latest_progress: float | None = None
         try:
-            while True:
+            while processed < 120:
                 event, payload = self.event_queue.get_nowait()
+                processed += 1
                 if event == "log":
-                    self._append_log(str(payload))
+                    pending_log.append(str(payload))
                 elif event == "progress":
-                    value = float(payload)
-                    self.progress["value"] = value
-                    self.percent_var.set(f"{value:.1f}%")
-                    if self.active_url:
-                        self._queue_insert_or_update(self.active_url, progress=f"{value:.1f}%")
+                    latest_progress = float(payload)
                 elif event == "status":
+                    if pending_log:
+                        self._append_log("".join(pending_log))
+                        pending_log.clear()
+                    if latest_progress is not None:
+                        self._apply_progress(latest_progress)
+                        latest_progress = None
                     self._set_status(str(payload))
                     if self.active_url:
                         self._queue_insert_or_update(self.active_url, status=self._status_label(str(payload)))
                 elif event == "finish":
+                    if pending_log:
+                        self._append_log("".join(pending_log))
+                        pending_log.clear()
+                    if latest_progress is not None:
+                        self._apply_progress(latest_progress)
+                        latest_progress = None
                     self._handle_finish(payload)  # type: ignore[arg-type]
                 elif event == "quality_result":
+                    if pending_log:
+                        self._append_log("".join(pending_log))
+                        pending_log.clear()
                     self._handle_quality_result(payload)  # type: ignore[arg-type]
                 elif event == "thumbnail_result":
                     self._handle_thumbnail_result(payload)  # type: ignore[arg-type]
@@ -1492,7 +1723,17 @@ class StreamDownloaderApp(BaseTk):
                     self._handle_app_update_result(payload)  # type: ignore[arg-type]
         except queue.Empty:
             pass
+        if pending_log:
+            self._append_log("".join(pending_log))
+        if latest_progress is not None:
+            self._apply_progress(latest_progress)
         self.after(100, self._process_events)
+
+    def _apply_progress(self, value: float) -> None:
+        self.progress["value"] = value
+        self.percent_var.set(f"{value:.1f}%")
+        if self.active_url:
+            self._queue_insert_or_update(self.active_url, progress=f"{value:.1f}%")
 
     def _handle_update_ytdlp_result(self, payload: tuple[bool, str]) -> None:
         success, message = payload
@@ -1673,7 +1914,7 @@ class StreamDownloaderApp(BaseTk):
             self._set_status("Error")
         self._append_log(f"\n{result.message}\n")
         self._append_log(f"Log file: {self.log_file}\n")
-        messagebox.showerror("Download error", result.message)
+        self.result_var.set("Ошибка загрузки. Подробности уже записаны в журнал ниже.\n" + result.message)
 
     def _select_and_probe_file(self) -> None:
         path = filedialog.askopenfilename(
@@ -1869,7 +2110,13 @@ class StreamDownloaderApp(BaseTk):
         open_folder(path)
 
     def _open_log_folder(self) -> None:
-        open_folder(self.log_file.parent)
+        try:
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            if not self.log_file.exists():
+                self.log_file.write_text("", encoding="utf-8")
+            self._open_file(self.log_file)
+        except Exception:
+            open_folder(self.log_file.parent)
 
     def _copy_log_to_clipboard(self) -> None:
         self.log_text.configure(state="normal")
@@ -1898,13 +2145,20 @@ class StreamDownloaderApp(BaseTk):
         save_config(
             AppConfig(
                 save_directory=self.save_dir_var.get().strip(),
-                quality=self.quality_var.get(),
+                quality=self._effective_quality(),
                 output_format=self.format_var.get(),
                 download_mode=self.mode_var.get(),
+                download_scope=self.download_scope_var.get(),
+                clip_start=self.clip_start_var.get().strip(),
+                clip_end=self.clip_end_var.get().strip(),
                 language=self.language_var.get(),
                 use_temp_first=self.temp_first_var.get(),
                 allow_playlist=self.allow_playlist_var.get(),
                 playlist_limit=self._playlist_limit(),
+                rf_network_profile=self.rf_network_var.get(),
+                stable_network_mode=self.stable_network_var.get(),
+                proxy_url=self.proxy_url_var.get().strip(),
+                cookies_browser=self.cookies_browser_var.get(),
             )
         )
 

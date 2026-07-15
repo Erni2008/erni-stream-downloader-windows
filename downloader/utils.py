@@ -41,9 +41,18 @@ def find_executable(name: str) -> str | None:
     if bundled:
         return bundled
 
+    vendor = _find_vendor_executable(name)
+    if vendor:
+        return vendor
+
     found = shutil.which(name)
     if found:
         return found
+
+    if platform.system() == "Windows" and name == "node":
+        winget_node = find_winget_package_executable("OpenJS.NodeJS.LTS", "node.exe")
+        if winget_node:
+            return winget_node
 
     extensions = [""]
     if platform.system() == "Windows":
@@ -77,6 +86,33 @@ def _find_bundled_executable(name: str) -> str | None:
         candidate = base_dir / f"{name}{extension}"
         if candidate.exists() and os.access(candidate, os.X_OK):
             return str(candidate)
+    return None
+
+
+def _find_vendor_executable(name: str) -> str | None:
+    project_dir = Path(__file__).resolve().parent.parent
+    vendor_dir = project_dir / "vendor"
+    extensions = [""]
+    if platform.system() == "Windows":
+        extensions = [".exe", ".cmd", ".bat", ""]
+    for extension in extensions:
+        candidate = vendor_dir / f"{name}{extension}"
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def find_winget_package_executable(package_id: str, executable_name: str) -> str | None:
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if not local_appdata:
+        return None
+    package_root = Path(local_appdata) / "Microsoft" / "WinGet" / "Packages"
+    if not package_root.exists():
+        return None
+    for package_dir in package_root.glob(f"{package_id}_*"):
+        for candidate in package_dir.rglob(executable_name):
+            if candidate.exists() and os.access(candidate, os.X_OK):
+                return str(candidate)
     return None
 
 
@@ -201,6 +237,15 @@ def human_error_message(raw_output: str, save_directory: Path) -> str:
 
     if "no space left on device" in text or "errno 28" in text:
         return "There is not enough free space on the selected drive or local disk."
+
+    if "[stalled]" in text:
+        return (
+            "The download/conversion stopped making progress for 90 seconds, so the app stopped it.\n"
+            "Try the same fragment again, or use a shorter fragment. The full log shows the last temp-file size."
+        )
+
+    if "error opening input" in text or "connection timed out" in text or "timed out" in text:
+        return "Network/YouTube stream timed out while cutting the fragment. Try again."
 
     if "requested format is not available" in text or "no video formats found" in text:
         return "yt-dlp could not find the selected format. Try Quality: Best available."
