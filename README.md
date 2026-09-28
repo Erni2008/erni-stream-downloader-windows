@@ -1,5 +1,8 @@
 # ERNI Stream Downloader for Windows
 
+> [!IMPORTANT]
+> This repository is preserved for the earlier Windows-specific build. Current cross-platform source code and releases are maintained in [erni-stream-downloader-universal](https://github.com/Erni2008/erni-stream-downloader-universal).
+
 Windows-версия ERNI Stream Downloader `1.8.0`.
 
 Приложение скачивает ваши видео через `yt-dlp` и `ffmpeg`, а затем при необходимости делает совместимый `MP4` для обычных плееров и монтажных программ.
